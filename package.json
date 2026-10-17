@@ -1,0 +1,17 @@
+{
+  "name": "repo2cloud",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Repo2Cloud: Automated AWS deployment platform with intelligent stack detection and Route 53 custom subdomains",
+  "scripts": {
+    "dev": "npm run dev --workspace=backend & npm run dev --workspace=frontend",
+    "dev:backend": "npm run dev --workspace=backend",
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "build": "npm run build --workspace=backend && npm run build --workspace=frontend",
+    "test": "npm run test --workspace=backend"
+  },
+  "workspaces": [
+    "backend",
+    "frontend"
+  ]
+}
