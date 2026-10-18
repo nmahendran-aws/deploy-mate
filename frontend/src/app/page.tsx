@@ -59,15 +59,15 @@ const DEFAULT_TARGET_META: Array<{
     target: 'ECS_FARGATE',
     title: 'ECS Fargate + ALB',
     subtitle: 'Docker Container + Application Load Balancer',
-    phaseBadge: 'Phase 4 Target',
-    isLiveReady: false,
+    phaseBadge: 'Phase 4 Active',
+    isLiveReady: true,
   },
   {
     target: 'LAMBDA_API_GATEWAY',
     title: 'Lambda + API Gateway',
     subtitle: 'Serverless Function + HTTP API v2',
-    phaseBadge: 'Phase 5 Target',
-    isLiveReady: false,
+    phaseBadge: 'Phase 5 Active',
+    isLiveReady: true,
   },
   {
     target: 'AMPLIFY',
@@ -300,11 +300,11 @@ export default function Phase3DeployPage() {
               <div className="flex items-center gap-2">
                 <h1 className="font-bold text-lg tracking-tight text-white">Repo2Cloud</h1>
                 <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                  Phase 1 + 2 + 3: Multi-Target Recommendation Engine
+                  Phase 1–5: S3+CloudFront, ECS Fargate &amp; Lambda + API Gateway
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Pre-Deployment Repository Inspector + Dynamic AWS Target Selector + Route 53 (maas-fam.com)
+                Multi-Target Recommendation Engine + AWS Lambda/API GW v2 + ECR/ECS Fargate + S3/CloudFront + Route 53 (maas-fam.com)
               </p>
             </div>
           </div>
@@ -955,32 +955,90 @@ export default function Phase3DeployPage() {
             )}
 
             {/* Provisioned AWS & Route 53 Resources */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-              <div className="rounded-xl bg-slate-950/80 border border-slate-800/80 p-3">
-                <div className="text-slate-400">Private S3 Bucket</div>
-                <div className="font-mono text-slate-200 mt-1 truncate">
-                  {deployment.resources.s3BucketName || 'Pending...'}
+            {deployment.target === 'LAMBDA_API_GATEWAY' ? (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <div className="rounded-xl bg-slate-950/80 border border-slate-800/80 p-3">
+                  <div className="text-slate-400">AWS Lambda Function</div>
+                  <div className="font-mono text-slate-200 mt-1 truncate">
+                    {deployment.resources.lambdaFunctionName || 'Pending...'}
+                  </div>
+                </div>
+                <div className="rounded-xl bg-slate-950/80 border border-slate-800/80 p-3">
+                  <div className="text-slate-400">API Gateway v2 (HTTP API)</div>
+                  <div
+                    className="font-mono text-slate-200 mt-1 truncate"
+                    title={deployment.resources.apiGatewayEndpoint}
+                  >
+                    {deployment.resources.apiGatewayId
+                      ? `${deployment.resources.apiGatewayId} ($default)`
+                      : 'Pending...'}
+                  </div>
+                </div>
+                <div className="rounded-xl bg-slate-950/80 border border-slate-800/80 p-3">
+                  <div className="text-slate-400">IAM Execution Role &amp; Route 53</div>
+                  <div
+                    className="font-mono text-slate-200 mt-1 truncate"
+                    title={deployment.resources.lambdaRoleArn}
+                  >
+                    {deployment.resources.route53RecordName
+                      ? `${deployment.resources.route53RecordName} -> API GW`
+                      : deployment.resources.lambdaRoleArn || 'Pending...'}
+                  </div>
                 </div>
               </div>
-              <div className="rounded-xl bg-slate-950/80 border border-slate-800/80 p-3">
-                <div className="text-slate-400">CloudFront Distribution &amp; OAC</div>
-                <div className="font-mono text-slate-200 mt-1 truncate">
-                  {deployment.resources.cloudFrontDistributionId
-                    ? `${deployment.resources.cloudFrontDistributionId} (${deployment.resources.cloudFrontOacId})`
-                    : 'Pending...'}
+            ) : deployment.target === 'ECS_FARGATE' ? (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <div className="rounded-xl bg-slate-950/80 border border-slate-800/80 p-3">
+                  <div className="text-slate-400">Amazon ECR Repository &amp; Image</div>
+                  <div className="font-mono text-slate-200 mt-1 truncate" title={deployment.resources.ecrRepositoryUri}>
+                    {deployment.resources.ecrRepositoryUri || 'Pending...'}
+                  </div>
+                </div>
+                <div className="rounded-xl bg-slate-950/80 border border-slate-800/80 p-3">
+                  <div className="text-slate-400">ECS Fargate Cluster &amp; Service</div>
+                  <div className="font-mono text-slate-200 mt-1 truncate">
+                    {deployment.resources.ecsServiceName
+                      ? `${deployment.resources.ecsClusterName} / ${deployment.resources.ecsServiceName}`
+                      : 'Pending...'}
+                  </div>
+                </div>
+                <div className="rounded-xl bg-slate-950/80 border border-slate-800/80 p-3">
+                  <div className="text-slate-400">ALB Target Group &amp; Route 53 Alias</div>
+                  <div className="font-mono text-slate-200 mt-1 truncate">
+                    {deployment.resources.route53RecordName
+                      ? `${deployment.resources.route53RecordName} -> ALB`
+                      : deployment.resources.albTargetGroupArn || 'Pending...'}
+                  </div>
                 </div>
               </div>
-              <div className="rounded-xl bg-slate-950/80 border border-slate-800/80 p-3">
-                <div className="text-slate-400">Route 53 Alias &amp; ACM (us-east-1)</div>
-                <div className="font-mono text-slate-200 mt-1 truncate">
-                  {deployment.resources.route53RecordName
-                    ? `${deployment.resources.route53RecordName} (${deployment.resources.route53HostedZoneId})`
-                    : deployment.customHostname
-                    ? `Reserved: ${deployment.customHostname}`
-                    : 'Default (*.cloudfront.net)'}
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <div className="rounded-xl bg-slate-950/80 border border-slate-800/80 p-3">
+                  <div className="text-slate-400">Private S3 Bucket</div>
+                  <div className="font-mono text-slate-200 mt-1 truncate">
+                    {deployment.resources.s3BucketName || 'Pending...'}
+                  </div>
+                </div>
+                <div className="rounded-xl bg-slate-950/80 border border-slate-800/80 p-3">
+                  <div className="text-slate-400">CloudFront Distribution &amp; OAC</div>
+                  <div className="font-mono text-slate-200 mt-1 truncate">
+                    {deployment.resources.cloudFrontDistributionId
+                      ? `${deployment.resources.cloudFrontDistributionId} (${deployment.resources.cloudFrontOacId})`
+                      : 'Pending...'}
+                  </div>
+                </div>
+                <div className="rounded-xl bg-slate-950/80 border border-slate-800/80 p-3">
+                  <div className="text-slate-400">Route 53 Alias &amp; ACM (us-east-1)</div>
+                  <div className="font-mono text-slate-200 mt-1 truncate">
+                    {deployment.resources.route53RecordName
+                      ? `${deployment.resources.route53RecordName} (${deployment.resources.route53HostedZoneId})`
+                      : deployment.customHostname
+                      ? `Reserved: ${deployment.customHostname}`
+                      : 'Default (*.cloudfront.net)'}
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
 
             {/* Step-by-Step Audit Log Stream */}
             <div className="space-y-2">

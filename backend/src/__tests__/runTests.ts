@@ -146,12 +146,100 @@ async function runPhase1To3Tests(): Promise<void> {
   const delRes = await manager.deleteDeployment(depId);
   assert.strictEqual(delRes.ok, true);
   assert.strictEqual(store.isHostnameAvailable('technica-demo.maas-fam.com'), true, 'Hostname must be released after delete');
+  console.log(`   ✓ End-to-end Phase 1–3 deployment & teardown verified (${completed.url}).`);
+
+  // Phase 4: Containerized Full-Stack / Backend on ECS Fargate + ECR + ALB
+  console.log('5. Testing Phase 4 (ECS Fargate + ECR + ALB + Auto-Dockerfile + Custom Subdomain)...');
+  const ecsStartRes = await manager.startDeployment({
+    repoUrl: 'https://github.com/example/express-docker-api',
+    target: 'ECS_FARGATE',
+    subdomain: 'express-api',
+    domain: 'maas-fam.com',
+    containerPort: 8080,
+    healthCheckPath: '/health',
+    envVars: { PORT: '8080', NODE_ENV: 'production' },
+  });
+  assert.strictEqual(ecsStartRes.ok, true);
+  assert.strictEqual(ecsStartRes.deployment?.target, 'ECS_FARGATE');
+  assert.strictEqual(ecsStartRes.deployment?.deploymentType, 'container');
+  assert.strictEqual(ecsStartRes.deployment?.customHostname, 'express-api.maas-fam.com');
+
+  const ecsDepId = ecsStartRes.deployment!.deploymentId;
+  for (let i = 0; i < 40; i++) {
+    const current = store.get(ecsDepId);
+    if (current?.status === 'LIVE' || current?.status === 'FAILED') {
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+
+  const ecsCompleted = store.get(ecsDepId)!;
+  assert.strictEqual(ecsCompleted.status, 'LIVE', 'ECS_FARGATE deployment must reach LIVE status');
+  assert.strictEqual(ecsCompleted.url, 'https://express-api.maas-fam.com');
+  assert.ok(ecsCompleted.resources.ecrRepositoryUri, 'Expected ECR repository URI in resources');
+  assert.ok(ecsCompleted.resources.ecsClusterName, 'Expected ECS cluster name in resources');
+  assert.ok(ecsCompleted.resources.ecsServiceName, 'Expected ECS service name in resources');
+  assert.ok(ecsCompleted.resources.ecsTaskDefinitionArn, 'Expected ECS task definition ARN in resources');
+  assert.ok(ecsCompleted.resources.albTargetGroupArn, 'Expected ALB target group ARN in resources');
+  assert.strictEqual(ecsCompleted.resources.route53RecordName, 'express-api.maas-fam.com');
+
+  const ecsDelRes = await manager.deleteDeployment(ecsDepId);
+  assert.strictEqual(ecsDelRes.ok, true);
+  assert.strictEqual(ecsDelRes.deployment?.status, 'DELETED');
+  assert.strictEqual(store.isHostnameAvailable('express-api.maas-fam.com'), true, 'ECS hostname must be released after delete');
+  console.log(`   ✓ End-to-end Phase 4 ECS Fargate deployment & teardown verified (${ecsCompleted.url}).`);
+
+  // Phase 5: Serverless Backend / APIs on AWS Lambda + Amazon API Gateway v2
+  console.log('6. Testing Phase 5 (AWS Lambda + API Gateway v2 HTTP API + PKZIP Bundle + Custom Subdomain)...');
+  const lambdaStartRes = await manager.startDeployment({
+    repoUrl: 'https://github.com/example/serverless-lambda-api',
+    target: 'LAMBDA_API_GATEWAY',
+    subdomain: 'serverless-api',
+    domain: 'maas-fam.com',
+    lambdaHandler: 'handler.handler',
+    runtime: 'nodejs20.x',
+    envVars: { STAGE: 'prod' },
+  });
+  assert.strictEqual(lambdaStartRes.ok, true);
+  assert.strictEqual(lambdaStartRes.deployment?.target, 'LAMBDA_API_GATEWAY');
+  assert.strictEqual(lambdaStartRes.deployment?.deploymentType, 'serverless');
+  assert.strictEqual(lambdaStartRes.deployment?.customHostname, 'serverless-api.maas-fam.com');
+
+  const lambdaDepId = lambdaStartRes.deployment!.deploymentId;
+  for (let i = 0; i < 40; i++) {
+    const current = store.get(lambdaDepId);
+    if (current?.status === 'LIVE' || current?.status === 'FAILED') {
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+
+  const lambdaCompleted = store.get(lambdaDepId)!;
+  assert.strictEqual(lambdaCompleted.status, 'LIVE', 'LAMBDA_API_GATEWAY deployment must reach LIVE status');
+  assert.strictEqual(lambdaCompleted.url, 'https://serverless-api.maas-fam.com');
+  assert.ok(lambdaCompleted.resources.lambdaFunctionName, 'Expected Lambda function name in resources');
+  assert.ok(lambdaCompleted.resources.lambdaRoleArn, 'Expected Lambda execution role ARN in resources');
+  assert.ok(lambdaCompleted.resources.apiGatewayId, 'Expected API Gateway v2 ID in resources');
+  assert.ok(
+    lambdaCompleted.resources.apiGatewayEndpoint?.includes('.execute-api.'),
+    'Expected API Gateway v2 endpoint in resources'
+  );
+  assert.strictEqual(lambdaCompleted.resources.route53RecordName, 'serverless-api.maas-fam.com');
+
+  const lambdaDelRes = await manager.deleteDeployment(lambdaDepId);
+  assert.strictEqual(lambdaDelRes.ok, true);
+  assert.strictEqual(lambdaDelRes.deployment?.status, 'DELETED');
+  assert.strictEqual(
+    store.isHostnameAvailable('serverless-api.maas-fam.com'),
+    true,
+    'Lambda custom hostname must be released after delete'
+  );
 
   if (fs.existsSync(tmpStoreFile)) {
     fs.unlinkSync(tmpStoreFile);
   }
-  console.log(`   ✓ End-to-end Phase 1–3 deployment & teardown verified (${completed.url}).\n`);
-  console.log('ALL PHASE 1, PHASE 2 & PHASE 3 TESTS PASSED!');
+  console.log(`   ✓ End-to-end Phase 5 Lambda + API Gateway deployment & teardown verified (${lambdaCompleted.url}).\n`);
+  console.log('ALL PHASE 1, PHASE 2, PHASE 3, PHASE 4 & PHASE 5 TESTS PASSED!');
 }
 
 runPhase1To3Tests().catch((err) => {

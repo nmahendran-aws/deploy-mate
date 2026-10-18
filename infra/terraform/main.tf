@@ -87,11 +87,68 @@ data "aws_iam_policy_document" "repo2cloud_deployer" {
     ]
     resources = ["*"]
   }
+
+  statement {
+    sid    = "ManagePhase4EcrAndEcsFargate"
+    effect = "Allow"
+    actions = [
+      "ecr:CreateRepository",
+      "ecr:DeleteRepository",
+      "ecr:DescribeRepositories",
+      "ecr:GetAuthorizationToken",
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:CompleteLayerUpload",
+      "ecr:InitiateLayerUpload",
+      "ecr:PutImage",
+      "ecr:UploadLayerPart",
+      "ecs:CreateCluster",
+      "ecs:DescribeClusters",
+      "ecs:RegisterTaskDefinition",
+      "ecs:DeregisterTaskDefinition",
+      "ecs:DescribeTaskDefinition",
+      "ecs:CreateService",
+      "ecs:UpdateService",
+      "ecs:DeleteService",
+      "ecs:DescribeServices",
+      "elasticloadbalancing:CreateTargetGroup",
+      "elasticloadbalancing:DeleteTargetGroup",
+      "elasticloadbalancing:DescribeTargetGroups",
+      "elasticloadbalancing:CreateRule",
+      "elasticloadbalancing:DeleteRule",
+      "elasticloadbalancing:DescribeRules",
+      "iam:PassRole"
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "ManagePhase5LambdaAndApiGatewayV2"
+    effect = "Allow"
+    actions = [
+      "lambda:CreateFunction",
+      "lambda:DeleteFunction",
+      "lambda:GetFunction",
+      "lambda:GetFunctionConfiguration",
+      "lambda:UpdateFunctionCode",
+      "lambda:UpdateFunctionConfiguration",
+      "lambda:AddPermission",
+      "lambda:RemovePermission",
+      "apigateway:POST",
+      "apigateway:GET",
+      "apigateway:DELETE",
+      "apigateway:PATCH",
+      "iam:GetRole",
+      "iam:CreateRole",
+      "iam:AttachRolePolicy",
+      "iam:PassRole"
+    ]
+    resources = ["*"]
+  }
 }
 
 resource "aws_iam_policy" "phase1_deployer_policy" {
-  name        = "repo2cloud-${var.environment}-s3-cf-route53-acm-policy"
-  description = "Least-privilege policy for Repo2Cloud Phase 1 & 2 (S3, CloudFront OAC, Route 53, ACM)"
+  name        = "repo2cloud-${var.environment}-s3-cf-route53-acm-ecs-lambda-policy"
+  description = "Least-privilege policy for Repo2Cloud Phases 1–5 (S3, CloudFront OAC, Route 53, ACM, ECR, ECS Fargate, ALB, Lambda, API Gateway v2)"
   policy      = data.aws_iam_policy_document.repo2cloud_deployer.json
 }
 
@@ -125,6 +182,57 @@ resource "aws_iam_role" "deployer_role" {
 resource "aws_iam_role_policy_attachment" "deployer_role_attach" {
   role       = aws_iam_role.deployer_role.name
   policy_arn = aws_iam_policy.phase1_deployer_policy.arn
+}
+
+# ============================================================================
+# Phase 4 Foundation: ECS Fargate Cluster & Task Execution Role
+# ============================================================================
+resource "aws_ecs_cluster" "repo2cloud" {
+  name = "repo2cloud-cluster"
+
+  setting {
+    name  = "containerInsights"
+    value = "enabled"
+  }
+}
+
+resource "aws_iam_role" "ecs_task_execution_role" {
+  name               = "repo2cloud-${var.environment}-ecs-execution-role"
+  assume_role_policy = data.aws_iam_policy_document.ec2_ecs_assume_role.json
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_task_execution_role_policy" {
+  role       = aws_iam_role.ecs_task_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
+resource "aws_cloudwatch_log_group" "ecs_fargate" {
+  name              = "/ecs/repo2cloud-fargate"
+  retention_in_days = 14
+}
+
+# ============================================================================
+# Phase 5 Foundation: AWS Lambda Execution Role
+# ============================================================================
+data "aws_iam_policy_document" "lambda_assume_role" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["lambda.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "lambda_execution_role" {
+  name               = "repo2cloud-lambda-exec-role"
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
+  role       = aws_iam_role.lambda_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
 # ============================================================================

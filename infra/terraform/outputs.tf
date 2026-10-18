@@ -32,3 +32,19 @@ output "configured_domains_env_value" {
   description = "Ready-to-paste CONFIGURED_DOMAINS value for .env"
   value       = var.root_domain_name != "" && var.route53_hosted_zone_id != "" ? "${var.root_domain_name}:${var.route53_hosted_zone_id}:${aws_acm_certificate_validation.wildcard[0].certificate_arn}" : null
 }
+
+output "ecs_cluster_name" {
+  description = "Phase 4 ECS Fargate cluster name"
+  value       = aws_ecs_cluster.repo2cloud.name
+}
+
+output "ecs_task_execution_role_arn" {
+  description = "Phase 4 ECS Fargate task execution role ARN"
+  value       = aws_iam_role.ecs_task_execution_role.arn
+}
+
+output "lambda_execution_role_arn" {
+  description = "Phase 5 AWS Lambda execution role ARN"
+  value       = aws_iam_role.lambda_execution_role.arn
+}
+

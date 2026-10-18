@@ -65,17 +65,15 @@ export class DeploymentManager {
     }
 
     const target = mapDeploymentTypeToTarget(req.deploymentType, req.target, 'S3_CLOUDFRONT');
-    if (target !== 'S3_CLOUDFRONT') {
+    if (
+      target !== 'S3_CLOUDFRONT' &&
+      target !== 'ECS_FARGATE' &&
+      target !== 'LAMBDA_API_GATEWAY'
+    ) {
       return {
         ok: false,
         statusCode: 400,
-        error: `Target "${target}" was selected in the Phase 3 recommendation engine; its live AWS provisioner will be unlocked in ${
-          target === 'ECS_FARGATE'
-            ? 'Phase 4 (ECS Fargate + ALB)'
-            : target === 'LAMBDA_API_GATEWAY'
-            ? 'Phase 5 (Lambda + API Gateway)'
-            : 'Phase 6 (AWS Amplify Hosting)'
-        }. Currently active provisioner: S3_CLOUDFRONT.`,
+        error: `Target "${target}" was selected in the Phase 3 recommendation engine; its live AWS provisioner will be unlocked in Phase 6 (AWS Amplify Hosting). Currently active provisioners: S3_CLOUDFRONT, ECS_FARGATE, LAMBDA_API_GATEWAY.`,
       };
     }
 
@@ -131,13 +129,23 @@ export class DeploymentManager {
     const now = new Date().toISOString();
     const dryRun = this.isDryRunMode();
 
+    const resolvedDeploymentType =
+      req.deploymentType ||
+      (target === 'ECS_FARGATE'
+        ? 'container'
+        : target === 'LAMBDA_API_GATEWAY'
+        ? 'serverless'
+        : target === 'AMPLIFY'
+        ? 'fullstack'
+        : 'static');
+
     const record: DeploymentRecord = {
       deploymentId,
       repoUrl: repoCheck.data.normalizedUrl,
       repoOwner: repoCheck.data.owner,
       repoName: repoCheck.data.repo,
       branch: req.branch || repoCheck.data.branch || 'main',
-      deploymentType: req.deploymentType || 'static',
+      deploymentType: resolvedDeploymentType,
       target,
       status: 'BUILDING',
       subdomain: subdomainCheck.subdomain,
@@ -293,19 +301,19 @@ export class DeploymentManager {
       );
       await stepDelay(record.dryRun ? 300 : 50);
 
-      // Phase 2 Task 4: Request or configure ACM TLS certificate in us-east-1 if custom subdomain requested
+      // Phase 2 Task 4: Request or configure ACM TLS certificate if custom subdomain requested
       let acmCertificateArn: string | undefined;
       const latestRecord = this.store.get(deploymentId)!;
 
       if (latestRecord.subdomain && domainConfig) {
         setStatus(
           'CONFIGURING_DOMAIN',
-          `Phase 2 Task 4: Ensuring ACM TLS certificate in us-east-1 for ${latestRecord.customHostname}...`
+          `Phase 2 Task 4: Ensuring ACM TLS certificate for ${latestRecord.customHostname}...`
         );
         acmCertificateArn = await sharedDomainManager.ensureTlsCertificate({
           subdomain: latestRecord.subdomain,
           domainConfig,
-          target: 'S3_CLOUDFRONT',
+          target: latestRecord.target,
           dryRun: latestRecord.dryRun,
           onLog: (msg) =>
             this.store.addLog(deploymentId, 'CONFIGURING_DOMAIN', 'INFO', msg),
@@ -313,10 +321,12 @@ export class DeploymentManager {
         this.store.updateResources(deploymentId, { acmCertificateArn });
       }
 
-      // Phase 1 Tasks 5 & 6 + Phase 2 Task 5: Upload to private S3 & create CloudFront distribution (with custom alias if configured)
+      // Phase 1 Tasks 5 & 6 / Phase 4 Tasks 2–5: Deploy to target AWS architecture
       setStatus(
         'DEPLOYING',
-        'Uploading static assets to private S3 bucket and creating CloudFront OAC distribution...'
+        latestRecord.target === 'ECS_FARGATE'
+          ? 'Provisioning Amazon ECR repository, ECS Cluster, Fargate Task Definition, and ALB routing...'
+          : 'Uploading static assets to private S3 bucket and creating CloudFront OAC distribution...'
       );
 
       const deployOutput = await deployer.deploy({
@@ -338,9 +348,11 @@ export class DeploymentManager {
       this.store.updateChecklist(deploymentId, { cloudResourcesConfigured: true });
       await stepDelay(latestRecord.dryRun ? 300 : 50);
 
-      // Phase 2 Tasks 6 & 7: Create Route 53 Alias record pointing to CloudFront & poll for DNS readiness
+      // Phase 2 Tasks 6 & 7: Create Route 53 Alias record pointing to CloudFront/ALB & poll for DNS readiness
       let finalVerifiedUrl = deployOutput.infrastructureUrl;
       const isPlaceholderZone = sharedDomainManager.isPlaceholderDomainConfig(domainConfig);
+      const isSimulatedAlb =
+        latestRecord.target === 'ECS_FARGATE' && !process.env.ECS_ALB_DNS_NAME;
 
       if (latestRecord.subdomain && domainConfig && acmCertificateArn) {
         setStatus(
@@ -354,7 +366,7 @@ export class DeploymentManager {
           targetDnsName: deployOutput.targetDnsName,
           targetHostedZoneId: deployOutput.targetHostedZoneId,
           acmCertificateArn,
-          dryRun: latestRecord.dryRun,
+          dryRun: latestRecord.dryRun || isSimulatedAlb,
           onLog: (msg) =>
             this.store.addLog(deploymentId, 'CONFIGURING_DOMAIN', 'INFO', msg),
         });
@@ -378,7 +390,7 @@ export class DeploymentManager {
 
       await sharedDomainManager.verifyHttpsEndpoint(
         finalVerifiedUrl,
-        latestRecord.dryRun,
+        latestRecord.dryRun || isSimulatedAlb,
         isPlaceholderZone,
         deployOutput.infrastructureUrl,
         (msg) => this.store.addLog(deploymentId, 'VERIFYING', 'INFO', msg)
