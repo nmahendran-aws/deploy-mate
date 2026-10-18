@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Repo2Cloud - Technica 2026</title>
+<style>
+@page{size:1920px 1080px;margin:0}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#0B1020;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+body{font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;color:#E8ECF8}
+.s{width:1920px;height:1080px;position:relative;overflow:hidden;page-break-after:always;break-after:page;padding:100px 120px 110px;background:radial-gradient(900px 600px at 90% 0%,#1B2A6B 0%,transparent 70%),radial-gradient(800px 500px at 0% 100%,#0E4A5C 0%,transparent 70%),#0B1020}
+.light{background:#F5F7FC;color:#0B1020}
+.eyebrow{font-family:Menlo,Monaco,monospace;font-size:26px;font-weight:700;letter-spacing:4px;color:#22D3EE;text-transform:uppercase;margin-bottom:18px}
+.light .eyebrow{color:#4F46E5}
+h1{font-size:150px;line-height:1;font-weight:800;letter-spacing:-3px}
+h2{font-size:68px;line-height:1.1;font-weight:800;letter-spacing:-1px;margin-bottom:44px;max-width:1600px}
+h3{font-size:40px;font-weight:700;margin-bottom:10px}
+p,li{font-size:30px;line-height:1.4}
+.muted{color:#9AA6C8}.light .muted{color:#4A5578}
+.grad{background:linear-gradient(90deg,#22D3EE,#818CF8);-webkit-background-clip:text;background-clip:text;color:transparent}
+.row{display:flex;gap:28px}.col{display:flex;flex-direction:column}
+.card{flex:1;border-radius:26px;padding:36px;background:#131B3A;border:2px solid #263263}
+.light .card{background:#fff;border-color:#D8DEF0}
+.c1{background:linear-gradient(160deg,#0E4A5C,#0F2A4A);border-color:#22D3EE}
+.c2{background:linear-gradient(160deg,#6B3A0A,#3A1F0A);border-color:#FBBF24}
+.c3{background:linear-gradient(160deg,#4A1D6B,#2A1148);border-color:#C084FC}
+.c4{background:linear-gradient(160deg,#6B1D3A,#3A0F25);border-color:#FB7185}
+.tag{display:inline-block;font-family:Menlo,monospace;font-size:24px;font-weight:700;padding:8px 18px;border-radius:999px;background:#0B1020;border:2px solid currentColor;margin-bottom:18px}
+.foot{position:absolute;left:120px;right:120px;bottom:40px;display:flex;justify-content:space-between;font-size:22px;color:#7C89B0}
+.light .foot{color:#6B7599}
+table{width:100%;border-collapse:collapse;font-size:27px}
+th{text-align:left;padding:16px 20px;font-size:26px;color:#22D3EE;border-bottom:3px solid #263263}
+td{padding:15px 20px;border-bottom:1px solid #263263;vertical-align:top;line-height:1.3}
+td.us{color:#6EE7B7;font-weight:700}td.no{color:#FCA5A5}td.mid{color:#FCD34D}
+.pill{display:inline-block;padding:12px 24px;border-radius:14px;font-family:Menlo,monospace;font-size:26px;font-weight:700}
+.step{flex:1;text-align:center}.dot{width:120px;height:120px;border-radius:60px;margin:0 auto 18px;display:flex;align-items:center;justify-content:center;font-size:44px;font-weight:800;background:#4F46E5;color:#fff}
+.arrow{align-self:flex-start;margin-top:36px;font-size:56px;color:#22D3EE}
+.big{font-size:120px;font-weight:800;line-height:1}
+</style></head><body>
+
+<!-- 1 COVER -->
+<section id="p1" class="s">
+<div class="eyebrow">Technica 2026 &middot; Cloud &amp; Developer Tools</div>
+<h1>Repo2<span class="grad">Cloud</span></h1>
+<p style="font-size:50px;margin-top:28px;max-width:1000px;line-height:1.25;color:#C7D0EE">Paste a GitHub repo. Get a live HTTPS app on <b style="color:#fff">your own AWS account</b>.</p>
+<p class="muted" style="margin-top:36px;font-size:32px">The one-click experience of Vercel, with the real cloud underneath. Built so students can ship &mdash; and learn AWS while they do.</p>
+<img src="dashboard.png" style="position:absolute;right:120px;top:120px;width:560px;border-radius:24px;border:3px solid #22D3EE;box-shadow:0 30px 80px #000;transform:rotate(2deg)">
+<div class="row" style="position:absolute;left:120px;bottom:120px">
+<span class="pill" style="background:#22D3EE;color:#0B1020">S3 + CloudFront</span><span class="pill" style="background:#FBBF24;color:#0B1020">ECS Fargate</span><span class="pill" style="background:#C084FC;color:#0B1020">Lambda + API GW</span><span class="pill" style="background:#FB7185;color:#0B1020">AWS Amplify</span>
+</div>
+<div class="foot"><span>Repo2Cloud</span><span>1 / 9</span></div>
+</section>
+
+<!-- 2 PROBLEM -->
+<section id="p2" class="s light">
+<div class="eyebrow">The problem</div>
+<h2>Students can build apps. Getting them online is where projects stall.</h2>
+<div class="row">
+<div class="card"><h3>Vercel &amp; Netlify</h3><p class="muted">Great developer experience, but:</p><ul style="margin:14px 0 0 30px"><li>Infrastructure lives in <b>their</b> account</li><li>Seat and bandwidth pricing; no AWS credits</li><li>Long-lived Docker or WebSocket backends hit serverless limits</li></ul></div>
+<div class="card"><h3>Raw AWS console</h3><p class="muted">Full power, but hours of setup:</p><ul style="margin:14px 0 0 30px"><li>S3 policies, CloudFront OAC, ACM in us-east-1</li><li>Route 53 records, ECR, ECS tasks, IAM roles</li><li>Easy to misconfigure, easy to leave running</li></ul></div>
+<div class="card" style="background:#0B1020;color:#fff;border-color:#22D3EE"><h3 class="grad">Repo2Cloud</h3><p style="color:#C7D0EE">Vercel-grade one-click experience on 100% native AWS infrastructure you own.</p></div>
+</div>
+<div class="foot"><span>Repo2Cloud &middot; Technica 2026</span><span>2 / 9</span></div>
+</section>
+
+<!-- 3 HOW IT WORKS -->
+<section id="p3" class="s">
+<div class="eyebrow">How it works</div>
+<h2>One paste, six automated steps</h2>
+<div class="row" style="margin-top:50px">
+<div class="step"><div class="dot">1</div><h3>Inspect</h3><p class="muted">Detect stack and score 4 AWS targets</p></div><div class="arrow">&rarr;</div>
+<div class="step"><div class="dot">2</div><h3>Guard</h3><p class="muted">Security checks and cost quota</p></div><div class="arrow">&rarr;</div>
+<div class="step"><div class="dot">3</div><h3>Build</h3><p class="muted">Isolated sandbox, keys stripped</p></div><div class="arrow">&rarr;</div>
+<div class="step"><div class="dot">4</div><h3>Deploy</h3><p class="muted">Provision the best-fit AWS service</p></div><div class="arrow">&rarr;</div>
+<div class="step"><div class="dot">5</div><h3>Domain</h3><p class="muted">Route 53 + ACM HTTPS subdomain</p></div><div class="arrow">&rarr;</div>
+<div class="step"><div class="dot" style="background:#10B981">6</div><h3>Live</h3><p class="muted">URL shown only after health checks pass</p></div>
+</div>
+<p class="pill" style="margin-top:90px;background:#131B3A;color:#FCD34D;font-size:28px">QUEUED &rarr; ANALYZING &rarr; BUILDING &rarr; DEPLOYING &rarr; CONFIGURING_DOMAIN &rarr; VERIFYING &rarr; LIVE</p>
+<div class="foot"><span>Strict URL gate: the link stays null until TLS and Route 53 health checks pass</span><span>3 / 9</span></div>
+</section>
+
+<!-- 4 DASHBOARD -->
+<section id="p4" class="s">
+<div class="eyebrow">The product</div>
+<h2 style="margin-bottom:30px">A dashboard that shows its work</h2>
+<div class="row" style="gap:50px">
+<div style="width:700px;height:760px;overflow:hidden;border-radius:24px;border:3px solid #22D3EE;box-shadow:0 30px 80px #000"><img src="dashboard.png" style="width:700px"></div>
+<div class="col" style="gap:16px;flex:1;font-size:26px">
+<div class="card" style="padding:20px 28px"><h3 style="color:#22D3EE;font-size:36px;margin-bottom:6px">Auto-detect</h3><p class="muted" style="font-size:26px;line-height:1.3">Paste any public GitHub URL or pick a preset. Framework and confidence appear in seconds.</p></div>
+<div class="card" style="padding:20px 28px"><h3 style="color:#FBBF24;font-size:36px;margin-bottom:6px">Architecture fit scores</h3><p class="muted" style="font-size:26px;line-height:1.3">All four AWS targets are scored (S3 + CloudFront 96%, Amplify 78%, ECS 55%, Lambda 30% for a static site).</p></div>
+<div class="card" style="padding:20px 28px"><h3 style="color:#C084FC;font-size:36px;margin-bottom:6px">Custom subdomain</h3><p class="muted" style="font-size:26px;line-height:1.3">Pick a name on the shared domain, see availability instantly, deploy with one click.</p></div>
+<div class="card" style="padding:20px 28px"><h3 style="color:#FB7185;font-size:36px;margin-bottom:6px">Three views</h3><p class="muted" style="font-size:26px;line-height:1.3">Deploy Studio, Topology &amp; Cost ROI, and a Vercel / Netlify comparison.</p></div>
+</div></div>
+<div class="foot"><span>Live screenshot of the running app</span><span>4 / 9</span></div>
+</section>
+
+<!-- 5 ENGINE -->
+<section id="p5" class="s">
+<div class="eyebrow">4-target AWS engine</div>
+<h2>Your repo decides the architecture</h2>
+<div class="row">
+<div class="card c1"><span class="tag" style="color:#22D3EE">STATIC / SPA</span><h3>S3 + CloudFront</h3><p class="muted" style="color:#BFE9F2">Vite, React, Vue, Astro. Private bucket fronted by CloudFront Origin Access Control.</p></div>
+<div class="card c2"><span class="tag" style="color:#FBBF24">DOCKER / API</span><h3>ECR + ECS Fargate + ALB</h3><p class="muted" style="color:#F6DCA8">Express, Fastify, FastAPI, long-running backends. Generates a hardened non-root Dockerfile if missing.</p></div>
+<div class="card c3"><span class="tag" style="color:#C084FC">SERVERLESS</span><h3>Lambda + API Gateway</h3><p class="muted" style="color:#E3CCFB">Event-driven APIs. Packages the bundle and provisions an HTTP API v2 stage.</p></div>
+<div class="card c4"><span class="tag" style="color:#FB7185">SSR</span><h3>AWS Amplify</h3><p class="muted" style="color:#F9C3CD">Next.js App Router and full-stack apps. Generates amplify.yml for the compute branch.</p></div>
+</div>
+<p class="muted" style="margin-top:44px;font-size:30px">A deterministic analyzer reads <b style="color:#fff">package.json, Dockerfile, serverless.yml, next.config and requirements.txt</b> before anything is deployed.</p>
+<div class="foot"><span>Repo2Cloud &middot; Technica 2026</span><span>5 / 9</span></div>
+</section>
+
+<!-- 6 COMPARE -->
+<section id="p6" class="s">
+<div class="eyebrow">Versus Vercel &amp; Netlify</div>
+<h2 style="margin-bottom:26px">Same one-click ease. You own the infrastructure.</h2>
+<table>
+<tr><th style="width:27%">Capability</th><th style="width:33%">Repo2Cloud</th><th style="width:20%">Vercel</th><th style="width:20%">Netlify</th></tr>
+<tr><td>Supported architectures</td><td class="us">4 native AWS targets</td><td class="mid">Static &amp; serverless focus</td><td class="mid">Static &amp; serverless focus</td></tr>
+<tr><td>Long-running Docker containers</td><td class="us">ECS Fargate + ALB</td><td class="no">Execution time limits</td><td class="no">Function time limits</td></tr>
+<tr><td>Infrastructure ownership</td><td class="us">Your AWS account</td><td class="no">Their platform</td><td class="no">Their platform</td></tr>
+<tr><td>Pricing model</td><td class="us">Raw AWS rates, no seat fee</td><td class="mid">Per seat + bandwidth</td><td class="mid">Per seat + bandwidth</td></tr>
+<tr><td>Self-healing build recovery</td><td class="us">Auto-fixes lockfile and output issues</td><td class="no">Manual debugging</td><td class="no">Manual config edits</td></tr>
+<tr><td>Strict URL gate</td><td class="us">TLS + Route 53 health probe first</td><td class="mid">URL shown early</td><td class="mid">URL shown early</td></tr>
+<tr><td>Full resource teardown</td><td class="us">S3, CloudFront, ECR, ECS, Lambda, DNS</td><td class="mid">Project delete</td><td class="mid">Site delete</td></tr>
+</table>
+<p class="muted" style="margin-top:26px;font-size:26px">Vercel and Netlify are excellent frontend hosts. Repo2Cloud targets a different need: owning and learning the cloud. Comparison reflects the project team's research.</p>
+<div class="foot"><span>Repo2Cloud &middot; Technica 2026</span><span>6 / 9</span></div>
+</section>
+
+<!-- 7 STUDENTS -->
+<section id="p7" class="s light">
+<div class="eyebrow">Why it fits students</div>
+<h2>Ship the project. Learn the cloud.</h2>
+<div class="row" style="flex-wrap:wrap">
+<div class="card" style="flex:1 1 44%;border:3px solid #4F46E5"><h3>Learn real AWS</h3><p class="muted">Every deploy creates S3, CloudFront, ECS or Lambda and Route 53 resources you can inspect in your own account.</p></div>
+<div class="card" style="flex:1 1 44%;border:3px solid #F97316"><h3>Stretch free tier and credits</h3><p class="muted">It runs in your account, so AWS free tier and student credits apply. No platform seat fee.</p></div>
+<div class="card" style="flex:1 1 44%;border:3px solid #0B1020"><h3>Safe by default</h3><p class="muted">Private buckets, AWS keys stripped from builds, input filtering, and a cap on live deployments.</p></div>
+<div class="card" style="flex:1 1 44%;border:3px solid #10B981"><h3>No surprise bills</h3><p class="muted">One click tears down every resource and frees the subdomain for reuse.</p></div>
+</div>
+<p style="margin-top:40px;font-size:32px"><b>Bonus:</b> your project gets a real HTTPS domain you can put on a resume or portfolio.</p>
+<div class="foot"><span>Repo2Cloud &middot; Technica 2026</span><span>7 / 9</span></div>
+</section>
+
+<!-- 8 SECURITY -->
+<section id="p8" class="s">
+<div class="eyebrow">Trust &amp; reliability</div>
+<h2>Zero-trust builds, self-healing deploys</h2>
+<div class="row">
+<div class="card"><h3 style="color:#22D3EE">Phase 7: Zero-trust sandbox</h3><ul style="margin:12px 0 0 30px;color:#C7D0EE"><li>AWS_*, GITHUB_*, LD_PRELOAD and NODE_OPTIONS stripped from build environments</li><li>Symlink escape and path traversal guard before upload</li><li>Shell-injection filter, 100 MB repo limit, 20 live-deployment cost cap</li></ul></div>
+<div class="card"><h3 style="color:#FBBF24">Phase 8: Self-healing engine</h3><ul style="margin:12px 0 0 30px;color:#C7D0EE"><li>Diagnoses empty output folders, missing lockfiles and port mismatches</li><li>Patches the configuration (for example outputDirectory to ".") and retries</li><li>Completes the deployment without manual debugging</li></ul></div>
+</div>
+<div class="row" style="margin-top:36px;align-items:center"><span class="pill" style="background:#131B3A;color:#6EE7B7">Dashboard + API</span><span class="arrow" style="margin:0">&rarr;</span><span class="pill" style="background:#131B3A;color:#6EE7B7">Analyzer</span><span class="arrow" style="margin:0">&rarr;</span><span class="pill" style="background:#131B3A;color:#6EE7B7">Security guard</span><span class="arrow" style="margin:0">&rarr;</span><span class="pill" style="background:#131B3A;color:#6EE7B7">Isolated build</span><span class="arrow" style="margin:0">&rarr;</span><span class="pill" style="background:#131B3A;color:#6EE7B7">4 AWS targets + Route 53</span></div>
+<div class="foot"><span>Repo2Cloud &middot; Technica 2026</span><span>8 / 9</span></div>
+</section>
+
+<!-- 9 CLOSE -->
+<section id="p9" class="s" style="background:radial-gradient(900px 600px at 85% 20%,#4F46E5 0%,transparent 70%),radial-gradient(800px 500px at 10% 100%,#0E7490 0%,transparent 70%),#0B1020">
+<div class="eyebrow">Live demo &middot; about 3 minutes</div>
+<h1 style="font-size:120px">Paste a repo. <span class="grad">Own the cloud.</span></h1>
+<div class="row" style="margin-top:56px">
+<div class="card"><div class="tag" style="color:#22D3EE">0:00</div><h3>Inspect</h3><p class="muted">Pick a preset, watch targets get scored</p></div>
+<div class="card"><div class="tag" style="color:#FBBF24">0:40</div><h3>Compare</h3><p class="muted">Cost ROI and topology view</p></div>
+<div class="card"><div class="tag" style="color:#C084FC">1:30</div><h3>Deploy</h3><p class="muted">Custom subdomain, live pipeline and logs</p></div>
+<div class="card"><div class="tag" style="color:#FB7185">2:30</div><h3>Open &amp; tear down</h3><p class="muted">Live HTTPS site, then one-click cleanup</p></div>
+</div>
+<p class="muted" style="margin-top:40px;font-size:30px">Thank you &middot; Technica 2026 &middot; Repo2Cloud</p>
+<div class="foot"><span>Vercel-simple deployment, running on your AWS</span><span>9 / 9</span></div>
+</section>
+</body></html>
