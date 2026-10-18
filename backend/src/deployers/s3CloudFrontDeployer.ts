@@ -17,6 +17,7 @@ import {
   DeleteBucketCommand,
   DeleteBucketPolicyCommand,
   DeleteObjectCommand,
+  DeleteObjectsCommand,
   ListObjectsV2Command,
   PutBucketPolicyCommand,
   PutObjectCommand,
@@ -458,13 +459,28 @@ export class S3CloudFrontDeployer implements IDeployer {
     if (s3BucketName) {
       const s3 = new S3Client({ region });
       try {
-        const listed = await s3.send(new ListObjectsV2Command({ Bucket: s3BucketName }));
-        for (const obj of listed.Contents || []) {
-          if (obj.Key) {
-            await s3.send(new DeleteObjectCommand({ Bucket: s3BucketName, Key: obj.Key }));
+        // ListObjectsV2 returns at most 1000 keys per page, so loop until the bucket is empty.
+        let deletedCount = 0;
+        let continuationToken: string | undefined;
+        do {
+          const listed = await s3.send(
+            new ListObjectsV2Command({ Bucket: s3BucketName, ContinuationToken: continuationToken })
+          );
+          const keys = (listed.Contents || [])
+            .filter((obj) => Boolean(obj.Key))
+            .map((obj) => ({ Key: obj.Key as string }));
+          if (keys.length > 0) {
+            await s3.send(
+              new DeleteObjectsCommand({
+                Bucket: s3BucketName,
+                Delete: { Objects: keys, Quiet: true },
+              })
+            );
+            deletedCount += keys.length;
           }
-        }
-        onLog(`Emptied all objects from S3 bucket ${s3BucketName}.`);
+          continuationToken = listed.IsTruncated ? listed.NextContinuationToken : undefined;
+        } while (continuationToken);
+        onLog(`Emptied ${deletedCount} object(s) from S3 bucket ${s3BucketName}.`);
 
         try {
           await s3.send(new DeleteBucketPolicyCommand({ Bucket: s3BucketName }));

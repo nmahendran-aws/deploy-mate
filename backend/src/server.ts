@@ -1,6 +1,7 @@
 import cors from 'cors';
 import dotenv from 'dotenv';
 import express, { NextFunction, Request, Response } from 'express';
+import fs from 'fs';
 import path from 'path';
 import { deployRouter } from './routes/deployRoutes';
 import { deploymentManager } from './services/deploymentManager';
@@ -65,12 +66,24 @@ app.get('/api/health', (_req: Request, res: Response) => {
 
 app.use('/api', deployRouter);
 
+// Serve Next.js static export frontend from /frontend/out when available
+const frontendOutDir = path.resolve(__dirname, '../../frontend/out');
+if (fs.existsSync(frontendOutDir)) {
+  app.use(express.static(frontendOutDir));
+  app.get('*', (req: Request, res: Response, next: NextFunction) => {
+    if (req.path.startsWith('/api')) {
+      return next();
+    }
+    res.sendFile(path.join(frontendOutDir, 'index.html'));
+  });
+}
+
 const PORT = Number(process.env.PORT || 4000);
 
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(
-      `[Repo2Cloud API] Listening on http://localhost:${PORT} (dryRun=${deploymentManager.isDryRunMode()})`
+      `[DeployMate API] Listening on http://localhost:${PORT} (dryRun=${deploymentManager.isDryRunMode()})`
     );
   });
 }
