@@ -35,11 +35,15 @@ export class IsolatedBuildRunner {
    * NEVER passes AWS credentials, session tokens, or backend secrets into build workers (Phase 7).
    */
   public createSanitizedWorkerEnv(
-    userEnvVars: Record<string, string> = {}
+    userEnvVars: Record<string, string> = {},
+    repoDir?: string
   ): NodeJS.ProcessEnv {
     const nodeBinDir = path.dirname(process.execPath);
+    const extraPaths = repoDir
+      ? `${path.join(repoDir, 'node_modules', '.bin')}:${path.join(repoDir, 'frontend', 'node_modules', '.bin')}:`
+      : '';
     return {
-      PATH: `${nodeBinDir}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin`,
+      PATH: `${extraPaths}${nodeBinDir}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin`,
       HOME: this.buildRoot,
       CI: 'true',
       NODE_ENV: 'production',
@@ -164,7 +168,7 @@ export class IsolatedBuildRunner {
       params.onLog?.(msg);
     };
 
-    const sanitizedEnv = this.createSanitizedWorkerEnv(params.userEnvVars);
+    const sanitizedEnv = this.createSanitizedWorkerEnv(params.userEnvVars, params.repoDir);
     const nodeExec = process.execPath;
     const npmCli = path.join(path.dirname(nodeExec), 'npm');
 
@@ -249,11 +253,11 @@ export class IsolatedBuildRunner {
     let generatedFiles = this.listFilesRecursively(artifactDir, artifactDir);
     if (generatedFiles.length === 0) {
       const repoFiles = this.listFilesRecursively(params.repoDir, params.repoDir);
-      if (repoFiles.length > 0) {
+      if (repoFiles.length > 0 && repoFiles.includes('index.html')) {
         generatedFiles = repoFiles;
       } else {
         throw new Error(
-          `Build finished but output directory "${outSubdir}/" is empty. Verify buildCommand and outputDirectory.`
+          `Build finished but output directory "${outSubdir}/" is empty or missing index.html. Verify buildCommand and outputDirectory.`
         );
       }
     }
