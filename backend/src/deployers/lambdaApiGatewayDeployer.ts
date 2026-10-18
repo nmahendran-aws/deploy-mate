@@ -403,14 +403,14 @@ export class LambdaApiGatewayDeployer implements IDeployer {
     onLog: (msg: string) => void;
   }): Promise<{ apiId: string; apiEndpoint: string; apiDomain: string }> {
     const createPayload = JSON.stringify({
-      Name: params.apiName,
-      ProtocolType: 'HTTP',
-      Target: params.functionArn,
-      Description: `Repo2Cloud Serverless HTTP API for ${params.functionName}`,
-      CorsConfiguration: {
-        AllowOrigins: ['*'],
-        AllowMethods: ['*'],
-        AllowHeaders: ['*'],
+      name: params.apiName,
+      protocolType: 'HTTP',
+      target: params.functionArn,
+      description: `Repo2Cloud Serverless HTTP API for ${params.functionName}`,
+      corsConfiguration: {
+        allowOrigins: ['*'],
+        allowMethods: ['*'],
+        allowHeaders: ['*'],
       },
     });
 
@@ -421,10 +421,11 @@ export class LambdaApiGatewayDeployer implements IDeployer {
       method: 'POST',
       path: '/v2/apis',
       body: createPayload,
-    })) as { ApiId?: string; ApiEndpoint?: string };
+    })) as { apiId?: string; apiEndpoint?: string; ApiId?: string; ApiEndpoint?: string };
 
-    const apiId = apiRes.ApiId || `api-${Date.now()}`;
+    const apiId = apiRes.apiId || apiRes.ApiId || `api-${Date.now()}`;
     const apiEndpoint =
+      apiRes.apiEndpoint ||
       apiRes.ApiEndpoint ||
       `https://${apiId}.execute-api.${params.region}.amazonaws.com`;
     const apiDomain = apiEndpoint.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
