@@ -1,3 +1,5 @@
+import dotenv from 'dotenv';
+import path from 'path';
 import { ConfiguredDomain, DeploymentTarget, DeploymentTypeInput } from '../types/deployment';
 
 export interface ValidatedGitHubRepo {
@@ -214,9 +216,13 @@ export function validateSubdomain(rawSubdomain: unknown): {
  * Format: domainName:hostedZoneId[:acmCertArn],...
  */
 export function getConfiguredDomains(): ConfiguredDomain[] {
+  if (process.env.FORCE_DRY_RUN_TEST !== 'true') {
+    dotenv.config({ path: path.resolve(__dirname, '../../../.env'), override: true });
+    dotenv.config({ override: true });
+  }
   const raw =
     process.env.CONFIGURED_DOMAINS ||
-    'repo2cloud.dev:Z0123456789ABCDEF:arn:aws:acm:us-east-1:123456789012:certificate/demo-cert,technica2026.cloud:Z9876543210FEDCBA';
+    'maas-fam.com:Z08163272O28TLSJ7THDI';
 
   const entries = raw
     .split(',')

@@ -1,13 +1,50 @@
 import { Request, Response, Router } from 'express';
 import { deploymentManager } from '../services/deploymentManager';
+import { repositoryAnalyzer } from '../services/repositoryAnalyzer';
 import { deploymentStore } from '../store/deploymentStore';
 import {
   getConfiguredDomains,
   resolveServerControlledDomain,
+  validateGitHubRepoUrl,
   validateSubdomain,
 } from '../utils/validation';
 
 export const deployRouter = Router();
+
+/**
+ * POST /api/analyze
+ * Phase 3: Pre-deployment repository inspection & multi-target recommendation engine.
+ * Inspects a GitHub repository (package.json, Dockerfile, serverless.yml, next.config.*, etc.)
+ * and returns the recommended AWS target, confidence score, detected signals, and suggested form fields.
+ */
+deployRouter.post('/analyze', async (req: Request, res: Response) => {
+  const { repoUrl, branch } = req.body || {};
+  const repoCheck = validateGitHubRepoUrl(repoUrl);
+  if (!repoCheck.valid || !repoCheck.data) {
+    return res.status(400).json({
+      error: repoCheck.error || 'Invalid GitHub repository URL.',
+    });
+  }
+
+  const effectiveBranch =
+    typeof branch === 'string' && branch.trim()
+      ? branch.trim()
+      : repoCheck.data.branch || 'main';
+
+  const analysis = await repositoryAnalyzer.analyzeRemoteGitHubRepo(
+    repoCheck.data.owner,
+    repoCheck.data.repo,
+    effectiveBranch
+  );
+
+  return res.json({
+    repoUrl: repoCheck.data.normalizedUrl,
+    owner: repoCheck.data.owner,
+    repo: repoCheck.data.repo,
+    branch: effectiveBranch,
+    analysis,
+  });
+});
 
 /**
  * GET /api/domains

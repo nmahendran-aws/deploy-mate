@@ -1,5 +1,16 @@
-export type DeploymentTarget = 'S3_CLOUDFRONT';
-export type DeploymentTypeInput = 'static';
+export type DeploymentTarget =
+  | 'S3_CLOUDFRONT'
+  | 'ECS_FARGATE'
+  | 'LAMBDA_API_GATEWAY'
+  | 'AMPLIFY';
+
+export type DeploymentTypeInput =
+  | 'static'
+  | 'container'
+  | 'serverless'
+  | 'amplify'
+  | 'auto';
+
 export type DeploymentStatus =
   | 'QUEUED'
   | 'ANALYZING'
@@ -11,6 +22,21 @@ export type DeploymentStatus =
   | 'FAILED'
   | 'DELETED';
 
+export interface SignalDetection {
+  signal: string;
+  description: string;
+  file?: string;
+}
+
+export interface TargetOptionAssessment {
+  target: DeploymentTarget;
+  title: string;
+  subtitle: string;
+  fitScore: number;
+  recommended: boolean;
+  reason: string;
+}
+
 export interface AnalysisResult {
   framework: string;
   applicationType: string;
@@ -20,6 +46,16 @@ export interface AnalysisResult {
   confidence: number;
   warnings: string[];
   reasons: string[];
+  signalsDetected?: SignalDetection[];
+  runtime?: string;
+  entryPoint?: string;
+  hasDockerfile?: boolean;
+  isMonorepo?: boolean;
+  suggestedContainerPort?: number;
+  suggestedHealthCheckPath?: string;
+  suggestedLambdaHandler?: string;
+  targetOptions?: TargetOptionAssessment[];
+  aiExplanation?: string;
 }
 
 export interface AuditLogEntry {
@@ -34,6 +70,7 @@ export interface DeploymentRecord {
   repoUrl: string;
   repoOwner: string;
   repoName: string;
+  branch?: string;
   deploymentType: DeploymentTypeInput;
   target: DeploymentTarget;
   status: DeploymentStatus;
@@ -43,6 +80,15 @@ export interface DeploymentRecord {
   url: string | null;
   infrastructureUrl?: string | null;
   analysis?: AnalysisResult;
+  targetConfig?: {
+    buildCommand?: string | null;
+    outputDirectory?: string | null;
+    containerPort?: number;
+    healthCheckPath?: string;
+    lambdaHandler?: string;
+    runtime?: string;
+    envVarKeys?: string[];
+  };
   checklist: {
     repositoryAnalyzed: boolean;
     buildCompleted: boolean;
@@ -57,6 +103,12 @@ export interface DeploymentRecord {
     acmCertificateArn?: string;
     route53HostedZoneId?: string;
     route53RecordName?: string;
+    ecrRepositoryUri?: string;
+    ecsClusterName?: string;
+    ecsServiceName?: string;
+    lambdaFunctionName?: string;
+    apiGatewayEndpoint?: string;
+    amplifyAppId?: string;
   };
   auditLogs: AuditLogEntry[];
   error?: {
@@ -73,6 +125,32 @@ export interface DeploymentRecord {
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
+
+/**
+ * POST /api/analyze
+ * Phase 3: Pre-deployment repository inspection & multi-target recommendation engine.
+ */
+export async function analyzeRepository(
+  repoUrl: string,
+  branch?: string
+): Promise<{
+  repoUrl: string;
+  owner: string;
+  repo: string;
+  branch: string;
+  analysis: AnalysisResult;
+}> {
+  const res = await fetch(`${API_BASE}/analyze`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ repoUrl, branch }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Failed to analyze repository');
+  }
+  return data;
+}
 
 /**
  * GET /api/domains
@@ -104,13 +182,22 @@ export async function fetchDomainsAndCheckSubdomain(
 
 /**
  * POST /api/deploy
- * Phase 1 & Phase 2 API Contract:
- * { "repoUrl": "...", "deploymentType": "static", "subdomain": "demo", "domain": "..." }
+ * Phase 1, Phase 2 & Phase 3 API Contract:
  */
 export async function createStaticDeployment(payload: {
   repoUrl: string;
+  target?: DeploymentTarget;
+  deploymentType?: DeploymentTypeInput;
+  branch?: string;
   subdomain?: string;
   domain?: string;
+  buildCommandOverride?: string;
+  outputDirOverride?: string;
+  containerPort?: number;
+  healthCheckPath?: string;
+  lambdaHandler?: string;
+  runtime?: string;
+  envVars?: Record<string, string>;
 }): Promise<{
   deploymentId: string;
   status: DeploymentStatus;
@@ -124,9 +211,18 @@ export async function createStaticDeployment(payload: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       repoUrl: payload.repoUrl,
-      deploymentType: 'static',
+      target: payload.target || 'S3_CLOUDFRONT',
+      deploymentType: payload.deploymentType || 'static',
+      branch: payload.branch,
       subdomain: payload.subdomain,
       domain: payload.domain,
+      buildCommandOverride: payload.buildCommandOverride,
+      outputDirOverride: payload.outputDirOverride,
+      containerPort: payload.containerPort,
+      healthCheckPath: payload.healthCheckPath,
+      lambdaHandler: payload.lambdaHandler,
+      runtime: payload.runtime,
+      envVars: payload.envVars,
     }),
   });
 

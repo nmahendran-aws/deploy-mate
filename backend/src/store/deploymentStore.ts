@@ -12,7 +12,7 @@ import {
 interface PersistedDatabase {
   deployments: Record<string, DeploymentRecord>;
   /**
-   * Maps full hostname (e.g. "demo.repo2cloud.dev") -> deploymentId
+   * Maps full hostname (e.g. "demo.maas-fam.com") -> deploymentId
    */
   reservedHostnames: Record<string, string>;
 }

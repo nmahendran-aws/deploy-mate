@@ -26,13 +26,13 @@ variable "create_deployer_iam_user" {
 # Phase 2 Variables: Custom Subdomains with Route 53 + ACM (us-east-1)
 # ============================================================================
 variable "route53_hosted_zone_id" {
-  description = "Optional existing Route 53 Hosted Zone ID (e.g., Z0123456789ABCDEF) for custom subdomains"
+  description = "Route 53 Hosted Zone ID for maas-fam.com custom subdomains"
   type        = string
-  default     = ""
+  default     = "Z08163272O28TLSJ7THDI"
 }
 
 variable "root_domain_name" {
-  description = "Optional root domain name registered in Route 53 (e.g., yourdomain.com) to provision a wildcard ACM certificate in us-east-1"
+  description = "Root domain name registered in Route 53 (maas-fam.com) to provision a wildcard ACM certificate in us-east-1"
   type        = string
-  default     = ""
+  default     = "maas-fam.com"
 }

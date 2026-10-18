@@ -11,6 +11,7 @@ import {
   DeploymentTarget,
 } from '../types/deployment';
 import {
+  mapDeploymentTypeToTarget,
   resolveServerControlledDomain,
   sanitizeUserEnvVars,
   validateGitHubRepoUrl,
@@ -40,11 +41,12 @@ export class DeploymentManager {
   }
 
   /**
-   * Phase 1 & Phase 2:
+   * Phase 1, Phase 2 & Phase 3:
    * - Validates GitHub URL
    * - Validates optional subdomain & server-controlled Route 53 domain
    * - Atomically reserves the hostname in database before deployment starts
-   * - Executes isolated build -> ACM us-east-1 cert -> S3/CloudFront OAC -> Route 53 Alias -> HTTPS verification
+   * - Applies Phase 3 target selection & dynamic target-specific configuration overrides
+   * - Executes isolated build -> ACM us-east-1 cert -> Target Deployer -> Route 53 Alias -> HTTPS verification
    */
   public async startDeployment(req: CreateDeploymentRequest): Promise<{
     ok: boolean;
@@ -62,11 +64,18 @@ export class DeploymentManager {
       };
     }
 
-    if (req.deploymentType && req.deploymentType !== 'static' && req.deploymentType !== 'auto') {
+    const target = mapDeploymentTypeToTarget(req.deploymentType, req.target, 'S3_CLOUDFRONT');
+    if (target !== 'S3_CLOUDFRONT') {
       return {
         ok: false,
         statusCode: 400,
-        error: `Currently supported deploymentType is "static" (received "${req.deploymentType}").`,
+        error: `Target "${target}" was selected in the Phase 3 recommendation engine; its live AWS provisioner will be unlocked in ${
+          target === 'ECS_FARGATE'
+            ? 'Phase 4 (ECS Fargate + ALB)'
+            : target === 'LAMBDA_API_GATEWAY'
+            ? 'Phase 5 (Lambda + API Gateway)'
+            : 'Phase 6 (AWS Amplify Hosting)'
+        }. Currently active provisioner: S3_CLOUDFRONT.`,
       };
     }
 
@@ -119,7 +128,6 @@ export class DeploymentManager {
       }
     }
 
-    const target: DeploymentTarget = 'S3_CLOUDFRONT';
     const now = new Date().toISOString();
     const dryRun = this.isDryRunMode();
 
@@ -128,8 +136,8 @@ export class DeploymentManager {
       repoUrl: repoCheck.data.normalizedUrl,
       repoOwner: repoCheck.data.owner,
       repoName: repoCheck.data.repo,
-      branch: req.branch || repoCheck.data.branch,
-      deploymentType: 'static',
+      branch: req.branch || repoCheck.data.branch || 'main',
+      deploymentType: req.deploymentType || 'static',
       target,
       status: 'BUILDING',
       subdomain: subdomainCheck.subdomain,
@@ -137,6 +145,15 @@ export class DeploymentManager {
       customHostname,
       url: null, // Populated ONLY after deployment & HTTPS verification pass
       infrastructureUrl: null,
+      targetConfig: {
+        buildCommand: req.buildCommandOverride?.trim() || undefined,
+        outputDirectory: req.outputDirOverride?.trim() || undefined,
+        containerPort: req.containerPort,
+        healthCheckPath: req.healthCheckPath,
+        lambdaHandler: req.lambdaHandler,
+        runtime: req.runtime,
+        envVarKeys: Object.keys(envCheck.sanitized),
+      },
       checklist: {
         repositoryAnalyzed: false,
         buildCompleted: false,
@@ -149,7 +166,7 @@ export class DeploymentManager {
           timestamp: now,
           phase: 'BUILDING',
           level: 'INFO',
-          message: `Deployment ${deploymentId} started for ${repoCheck.data.normalizedUrl}${
+          message: `Deployment ${deploymentId} started for ${repoCheck.data.normalizedUrl} [target=${target}]${
             customHostname ? ` with reserved hostname https://${customHostname}` : ''
           }.`,
         },
@@ -223,20 +240,28 @@ export class DeploymentManager {
             record.branch
           );
 
+      // Apply Phase 3 dynamic form overrides if supplied by the user
+      if (record.targetConfig?.buildCommand) {
+        analysis.buildCommand = record.targetConfig.buildCommand;
+      }
+      if (record.targetConfig?.outputDirectory) {
+        analysis.outputDirectory = record.targetConfig.outputDirectory;
+      }
+
       this.store.update(deploymentId, { analysis });
       this.store.addLog(
         deploymentId,
         'BUILDING',
         'INFO',
         `Detected ${analysis.framework} (buildCommand="${
-          analysis.buildCommand || 'npm run build'
-        }", outputDirectory="${analysis.outputDirectory || 'dist'}/").`
+          analysis.buildCommand || 'none'
+        }", outputDirectory="${analysis.outputDirectory || './'}").`
       );
 
-      const deployer = getDeployerForTarget('S3_CLOUDFRONT');
+      const deployer = getDeployerForTarget(record.target);
       const compatibility = deployer.validateCompatibility(analysis);
       if (!compatibility.compatible) {
-        const err = new Error(compatibility.reason || 'Repository is not a static frontend.');
+        const err = new Error(compatibility.reason || 'Repository is not compatible with selected target.');
         (err as Error & { code?: string; remediation?: string }).code = 'INCOMPATIBLE_STATIC_REPO';
         (err as Error & { code?: string; remediation?: string }).remediation =
           compatibility.remediation;

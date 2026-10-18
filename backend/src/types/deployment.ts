@@ -38,6 +38,15 @@ export interface SignalDetection {
   file?: string;
 }
 
+export interface TargetOptionAssessment {
+  target: DeploymentTarget;
+  title: string;
+  subtitle: string;
+  fitScore: number;
+  recommended: boolean;
+  reason: string;
+}
+
 export interface AnalysisResult {
   framework: string;
   applicationType: ApplicationType;
@@ -52,6 +61,10 @@ export interface AnalysisResult {
   entryPoint?: string;
   hasDockerfile?: boolean;
   isMonorepo?: boolean;
+  suggestedContainerPort?: number;
+  suggestedHealthCheckPath?: string;
+  suggestedLambdaHandler?: string;
+  targetOptions?: TargetOptionAssessment[];
   aiExplanation?: string;
 }
 
@@ -130,6 +143,15 @@ export interface DeploymentRecord {
     phase: DeploymentStatus;
     remediation?: string;
   } | null;
+  targetConfig?: {
+    buildCommand?: string | null;
+    outputDirectory?: string | null;
+    containerPort?: number;
+    healthCheckPath?: string;
+    lambdaHandler?: string;
+    runtime?: string;
+    envVarKeys?: string[];
+  };
   dryRun: boolean;
   retryCount: number;
   createdAt: string;
@@ -144,5 +166,11 @@ export interface CreateDeploymentRequest {
   subdomain?: string;
   domain?: string;
   branch?: string;
+  buildCommandOverride?: string;
+  outputDirOverride?: string;
+  containerPort?: number;
+  healthCheckPath?: string;
+  lambdaHandler?: string;
+  runtime?: string;
   envVars?: Record<string, string>;
 }

@@ -1,3 +1,4 @@
+import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -5,6 +6,7 @@ import {
   ApplicationType,
   DeploymentTarget,
   SignalDetection,
+  TargetOptionAssessment,
 } from '../types/deployment';
 
 export interface RepoInspectionSnapshot {
@@ -399,6 +401,30 @@ export class RepositoryAnalyzer {
       );
     }
 
+    const exposeMatch = snapshot.dockerfileContent?.match(/^\s*EXPOSE\s+(\d+)/im);
+    const suggestedContainerPort = exposeMatch
+      ? Number(exposeMatch[1])
+      : hasPythonSignals
+      ? 8000
+      : 3000;
+    const suggestedHealthCheckPath =
+      recommendedTarget === 'ECS_FARGATE' && applicationType !== 'ssr-frontend'
+        ? '/health'
+        : '/';
+    const suggestedLambdaHandler =
+      recommendedTarget === 'LAMBDA_API_GATEWAY' && entryPoint
+        ? entryPoint
+        : hasHandlerFile
+        ? 'handler.handler'
+        : 'index.handler';
+
+    const targetOptions = this.buildTargetOptions(
+      recommendedTarget,
+      framework,
+      applicationType,
+      hasDockerfile
+    );
+
     const aiExplanation = this.buildDeterministicExplanation({
       framework,
       applicationType,
@@ -425,8 +451,83 @@ export class RepositoryAnalyzer {
       entryPoint,
       hasDockerfile,
       isMonorepo: hasMonorepoFile,
+      suggestedContainerPort,
+      suggestedHealthCheckPath,
+      suggestedLambdaHandler,
+      targetOptions,
       aiExplanation,
     };
+  }
+
+  private buildTargetOptions(
+    recommendedTarget: DeploymentTarget,
+    framework: string,
+    applicationType: ApplicationType,
+    hasDockerfile: boolean
+  ): TargetOptionAssessment[] {
+    const options: TargetOptionAssessment[] = [
+      {
+        target: 'S3_CLOUDFRONT',
+        title: 'S3 + CloudFront (OAC)',
+        subtitle: 'Private S3 Origin + Global Edge CDN',
+        fitScore: recommendedTarget === 'S3_CLOUDFRONT' ? 96 : applicationType === 'static-frontend' ? 90 : 35,
+        recommended: recommendedTarget === 'S3_CLOUDFRONT',
+        reason:
+          recommendedTarget === 'S3_CLOUDFRONT'
+            ? `Optimal for ${framework}: zero idle compute cost, global edge caching, and strict Origin Access Control.`
+            : 'Best suited for static HTML/JS/SPA bundles that do not require a persistent server process.',
+      },
+      {
+        target: 'ECS_FARGATE',
+        title: 'ECS Fargate + ALB',
+        subtitle: 'Serverless Containers + Application Load Balancer',
+        fitScore:
+          recommendedTarget === 'ECS_FARGATE'
+            ? 95
+            : hasDockerfile || applicationType === 'node-server' || applicationType === 'python-service'
+            ? 88
+            : 55,
+        recommended: recommendedTarget === 'ECS_FARGATE',
+        reason:
+          recommendedTarget === 'ECS_FARGATE'
+            ? `Optimal for ${framework}: supports long-running HTTP servers, WebSockets, and custom Dockerfiles behind an ALB.`
+            : 'Can containerize any workload, though higher baseline cost than S3/CloudFront or Lambda for static/event apps.',
+      },
+      {
+        target: 'LAMBDA_API_GATEWAY',
+        title: 'Lambda + API Gateway',
+        subtitle: 'Event-Driven Serverless Functions + HTTP API v2',
+        fitScore:
+          recommendedTarget === 'LAMBDA_API_GATEWAY'
+            ? 94
+            : applicationType === 'node-server' || applicationType === 'python-service'
+            ? 72
+            : 30,
+        recommended: recommendedTarget === 'LAMBDA_API_GATEWAY',
+        reason:
+          recommendedTarget === 'LAMBDA_API_GATEWAY'
+            ? `Optimal for ${framework}: scales to zero automatically with sub-second cold starts behind API Gateway.`
+            : 'Ideal for stateless APIs and request handlers with serverless adapters (`serverless-http` / Mangum).',
+      },
+      {
+        target: 'AMPLIFY',
+        title: 'AWS Amplify Hosting',
+        subtitle: 'Managed Full-Stack CI/CD & Next.js SSR Compute',
+        fitScore:
+          recommendedTarget === 'AMPLIFY'
+            ? 93
+            : applicationType === 'static-frontend'
+            ? 78
+            : 40,
+        recommended: recommendedTarget === 'AMPLIFY',
+        reason:
+          recommendedTarget === 'AMPLIFY'
+            ? `Optimal for ${framework}: native Next.js App Router / SSR compute and Git branch deployment.`
+            : 'Managed hosting alternative for Next.js SSR and Git-connected frontend apps.',
+      },
+    ];
+
+    return options;
   }
 
   private collectLocalSnapshot(repoDir: string): RepoInspectionSnapshot {
@@ -495,6 +596,10 @@ export class RepositoryAnalyzer {
     repo: string,
     branch?: string
   ): Promise<RepoInspectionSnapshot> {
+    if (process.env.FORCE_DRY_RUN_TEST !== 'true') {
+      dotenv.config({ path: path.resolve(__dirname, '../../../.env'), override: true });
+      dotenv.config({ override: true });
+    }
     const headers: Record<string, string> = {
       Accept: 'application/vnd.github.v3+json',
       'User-Agent': 'Repo2Cloud-Analyzer/1.0',

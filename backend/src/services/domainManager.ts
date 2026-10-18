@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import https from 'https';
 import { ConfiguredDomain, DeploymentTarget } from '../types/deployment';
 
 /**
@@ -65,12 +66,52 @@ export class SharedDomainManager {
       return params.domainConfig.acmCertificateArn;
     }
 
+    // Check ACM in us-east-1 for an existing ISSUED certificate covering fullHostname or *.domain
+    const wildcardDomain = `*.${params.domainConfig.domain}`;
+    try {
+      const listRaw = await this.signedAwsRequest({
+        service: 'acm',
+        region,
+        method: 'POST',
+        host: `acm.${region}.amazonaws.com`,
+        path: '/',
+        headers: {
+          'content-type': 'application/x-amz-json-1.1',
+          'x-amz-target': 'CertificateManager.ListCertificates',
+        },
+        body: JSON.stringify({ CertificateStatuses: ['ISSUED'] }),
+      });
+      const listParsed = JSON.parse(listRaw) as {
+        CertificateSummaryList?: Array<{
+          CertificateArn?: string;
+          DomainName?: string;
+          SubjectAlternativeNameSummaries?: string[];
+        }>;
+      };
+      const existing = listParsed.CertificateSummaryList?.find(
+        (c) =>
+          c.DomainName === fullHostname ||
+          c.DomainName === wildcardDomain ||
+          c.SubjectAlternativeNameSummaries?.includes(fullHostname) ||
+          c.SubjectAlternativeNameSummaries?.includes(wildcardDomain)
+      );
+      if (existing?.CertificateArn) {
+        params.onLog?.(
+          `Task 4: Found existing ISSUED ACM certificate in ${region} (${existing.CertificateArn}) covering ${fullHostname}.`
+        );
+        return existing.CertificateArn;
+      }
+    } catch {
+      // Fall through to requesting a new certificate
+    }
+
     params.onLog?.(
-      `Task 4: Requesting ACM TLS certificate in ${region} (CloudFront requires us-east-1) for ${fullHostname}...`
+      `Task 4: Requesting wildcard ACM TLS certificate (${wildcardDomain}) in ${region} (CloudFront requires us-east-1) for ${fullHostname}...`
     );
 
     const reqPayload = JSON.stringify({
-      DomainName: fullHostname,
+      DomainName: wildcardDomain,
+      SubjectAlternativeNames: [params.domainConfig.domain],
       ValidationMethod: 'DNS',
     });
 
@@ -90,7 +131,7 @@ export class SharedDomainManager {
     const parsedReq = JSON.parse(reqRes) as { CertificateArn?: string };
     const certificateArn = parsedReq.CertificateArn;
     if (!certificateArn) {
-      throw new Error(`ACM did not return a CertificateArn for ${fullHostname}.`);
+      throw new Error(`ACM did not return a CertificateArn for ${wildcardDomain}.`);
     }
 
     // Poll ACM for the DNS validation CNAME record
@@ -254,6 +295,18 @@ export class SharedDomainManager {
           </AliasTarget>
         </ResourceRecordSet>
       </Change>
+      <Change>
+        <Action>UPSERT</Action>
+        <ResourceRecordSet>
+          <Name>${customHostname}</Name>
+          <Type>AAAA</Type>
+          <AliasTarget>
+            <HostedZoneId>${targetHostedZoneId}</HostedZoneId>
+            <DNSName>${dnsWithDot}</DNSName>
+            <EvaluateTargetHealth>false</EvaluateTargetHealth>
+          </AliasTarget>
+        </ResourceRecordSet>
+      </Change>
     </Changes>
   </ChangeBatch>
 </ChangeResourceRecordSetsRequest>`
@@ -311,6 +364,21 @@ export class SharedDomainManager {
     onLog?.(`Task 8: Verifying live HTTPS reachability at ${urlToVerify}...`);
 
     for (let attempt = 1; attempt <= 12; attempt++) {
+      // For custom subdomains, verify TLS SNI + Host header directly against the CloudFront edge first
+      // so the backend never triggers a premature OS DNS lookup that could cache NXDOMAIN on local VPN DNS.
+      if (urlToVerify !== fallbackCloudFrontUrl && fallbackCloudFrontUrl) {
+        const sniStatus = await this.verifyCustomDomainViaCloudFrontSni(
+          urlToVerify,
+          fallbackCloudFrontUrl
+        );
+        if (sniStatus && sniStatus >= 200 && sniStatus < 500) {
+          onLog?.(
+            `Task 8: Verified ${urlToVerify} TLS certificate (SNI) and HTTP ${sniStatus} via CloudFront edge.`
+          );
+          return;
+        }
+      }
+
       try {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 6000);
@@ -331,6 +399,45 @@ export class SharedDomainManager {
     }
 
     throw new Error(`Endpoint ${urlToVerify} did not respond over HTTPS within verification window.`);
+  }
+
+  private verifyCustomDomainViaCloudFrontSni(
+    customHttpsUrl: string,
+    cloudFrontHttpsUrl: string
+  ): Promise<number | null> {
+    return new Promise((resolve) => {
+      try {
+        const customHost = new URL(customHttpsUrl).hostname;
+        const cfHost = new URL(cloudFrontHttpsUrl).hostname;
+
+        const req = https.request(
+          {
+            hostname: cfHost,
+            port: 443,
+            path: '/',
+            method: 'GET',
+            servername: customHost,
+            headers: {
+              Host: customHost,
+            },
+            timeout: 6000,
+          },
+          (res) => {
+            res.resume();
+            resolve(res.statusCode || null);
+          }
+        );
+
+        req.on('error', () => resolve(null));
+        req.on('timeout', () => {
+          req.destroy();
+          resolve(null);
+        });
+        req.end();
+      } catch {
+        resolve(null);
+      }
+    });
   }
 
   /**
@@ -359,18 +466,20 @@ export class SharedDomainManager {
       ? params.targetDnsName
       : `${params.targetDnsName}.`;
 
-    await this.changeRoute53RecordXml(
-      params.hostedZoneId,
-      `<?xml version="1.0" encoding="UTF-8"?>
+    for (const recordType of ['A', 'AAAA']) {
+      try {
+        await this.changeRoute53RecordXml(
+          params.hostedZoneId,
+          `<?xml version="1.0" encoding="UTF-8"?>
 <ChangeResourceRecordSetsRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
   <ChangeBatch>
-    <Comment>Repo2Cloud cleanup for ${params.recordName}</Comment>
+    <Comment>Repo2Cloud cleanup for ${params.recordName} (${recordType})</Comment>
     <Changes>
       <Change>
         <Action>DELETE</Action>
         <ResourceRecordSet>
           <Name>${params.recordName}</Name>
-          <Type>A</Type>
+          <Type>${recordType}</Type>
           <AliasTarget>
             <HostedZoneId>${params.targetHostedZoneId || CLOUDFRONT_HOSTED_ZONE_ID}</HostedZoneId>
             <DNSName>${dnsName}</DNSName>
@@ -381,8 +490,12 @@ export class SharedDomainManager {
     </Changes>
   </ChangeBatch>
 </ChangeResourceRecordSetsRequest>`
-    );
-    params.onLog?.(`Deleted Route 53 ALIAS record ${params.recordName}.`);
+        );
+      } catch {
+        // Ignore if record type was already removed
+      }
+    }
+    params.onLog?.(`Deleted Route 53 ALIAS A/AAAA records for ${params.recordName}.`);
   }
 
   private async changeRoute53RecordXml(hostedZoneId: string, xmlBody: string): Promise<string> {
