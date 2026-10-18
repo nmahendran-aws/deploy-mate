@@ -2,6 +2,7 @@ import { Request, Response, Router } from 'express';
 import { deploymentManager } from '../services/deploymentManager';
 import { repositoryAnalyzer } from '../services/repositoryAnalyzer';
 import { securityGuardrails } from '../services/securityGuardrails';
+import { selfHealingEngine } from '../services/selfHealingEngine';
 import { deploymentStore } from '../store/deploymentStore';
 import {
   getConfiguredDomains,
@@ -19,6 +20,15 @@ export const deployRouter = Router();
  */
 deployRouter.get('/security/status', (_req: Request, res: Response) => {
   return res.json(securityGuardrails.getStatus(deploymentStore));
+});
+
+/**
+ * GET /api/observability/metrics
+ * Phase 8: Returns real-time platform observability metrics, success rate,
+ * average duration, self-healing recovery count, and active AWS resource breakdown.
+ */
+deployRouter.get('/observability/metrics', (_req: Request, res: Response) => {
+  return res.json(selfHealingEngine.computeMetrics(deploymentStore));
 });
 
 /**
@@ -190,5 +200,64 @@ deployRouter.delete('/deploy/:id', async (req: Request, res: Response) => {
     deploymentId: result.deployment.deploymentId,
     status: result.deployment.status,
     deployment: result.deployment,
+  });
+});
+
+/**
+ * POST /api/deploy/:id/retry
+ * Phase 8: 1-Click Self-Healing Retry for a FAILED deployment.
+ */
+deployRouter.post('/deploy/:id/retry', async (req: Request, res: Response) => {
+  const result = await deploymentManager.retryDeployment(req.params.id);
+  if (!result.ok || !result.deployment) {
+    return res.status(result.statusCode).json({ error: result.error });
+  }
+  return res.status(result.statusCode).json({
+    deploymentId: result.deployment.deploymentId,
+    status: result.deployment.status,
+    deployment: result.deployment,
+  });
+});
+
+/**
+ * GET /api/deploy/:id/stream
+ * Phase 8: Server-Sent Events (SSE) real-time audit log & status stream.
+ */
+deployRouter.get('/deploy/:id/stream', (req: Request, res: Response) => {
+  const record = deploymentStore.get(req.params.id);
+  if (!record) {
+    return res.status(404).json({ error: `Deployment "${req.params.id}" not found.` });
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  const sendUpdate = () => {
+    const latest = deploymentStore.get(req.params.id);
+    if (!latest) return true;
+    res.write(`data: ${JSON.stringify({ deployment: latest })}\n\n`);
+    return (
+      latest.status === 'LIVE' ||
+      latest.status === 'FAILED' ||
+      latest.status === 'DELETED'
+    );
+  };
+
+  if (sendUpdate()) {
+    res.end();
+    return;
+  }
+
+  const timer = setInterval(() => {
+    if (sendUpdate()) {
+      clearInterval(timer);
+      res.end();
+    }
+  }, 400);
+
+  req.on('close', () => {
+    clearInterval(timer);
   });
 });

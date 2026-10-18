@@ -326,3 +326,56 @@ export async function fetchSecurityStatus(): Promise<SecurityGuardrailsStatus> {
   return res.json();
 }
 
+export interface ObservabilityMetrics {
+  totalDeployments: number;
+  liveDeployments: number;
+  failedDeployments: number;
+  deletedDeployments: number;
+  inProgressDeployments: number;
+  successRatePercent: number;
+  averageDurationSec: number;
+  selfHealingRecoveries: number;
+  byTarget: Record<string, number>;
+  activeAwsResources: {
+    s3Buckets: number;
+    cloudFrontDistributions: number;
+    route53Records: number;
+    ecsServices: number;
+    lambdaFunctions: number;
+    amplifyApps: number;
+  };
+}
+
+/**
+ * GET /api/observability/metrics
+ * Phase 8: Fetches real-time platform observability metrics and AWS resource counts.
+ */
+export async function fetchObservabilityMetrics(): Promise<ObservabilityMetrics> {
+  const res = await fetch(`${API_BASE}/observability/metrics`);
+  if (!res.ok) {
+    throw new Error('Failed to fetch Phase 8 observability metrics');
+  }
+  return res.json();
+}
+
+/**
+ * POST /api/deploy/:id/retry
+ * Phase 8: Triggers a 1-click self-healing retry for a FAILED deployment.
+ */
+export async function retryFailedDeployment(deploymentId: string): Promise<{
+  deploymentId: string;
+  status: DeploymentStatus;
+  deployment: DeploymentRecord;
+}> {
+  const res = await fetch(
+    `${API_BASE}/deploy/${encodeURIComponent(deploymentId)}/retry`,
+    { method: 'POST' }
+  );
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Failed to retry deployment');
+  }
+  return data;
+}
+
+

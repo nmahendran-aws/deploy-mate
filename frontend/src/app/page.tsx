@@ -9,9 +9,12 @@ import {
   DeploymentRecord,
   DeploymentTarget,
   fetchDomainsAndCheckSubdomain,
+  fetchObservabilityMetrics,
   fetchSecurityStatus,
   getDeploymentStatus,
   listDeployments,
+  ObservabilityMetrics,
+  retryFailedDeployment,
   SecurityGuardrailsStatus,
 } from '@/lib/api';
 
@@ -116,19 +119,23 @@ export default function Phase3DeployPage() {
   const [deployment, setDeployment] = useState<DeploymentRecord | null>(null);
   const [history, setHistory] = useState<DeploymentRecord[]>([]);
   const [securityStatus, setSecurityStatus] = useState<SecurityGuardrailsStatus | null>(null);
+  const [metrics, setMetrics] = useState<ObservabilityMetrics | null>(null);
   const [isDeploying, setIsDeploying] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
 
   const refreshHistory = useCallback(async () => {
     try {
-      const [res, sec] = await Promise.all([
+      const [res, sec, obs] = await Promise.all([
         listDeployments(),
         fetchSecurityStatus().catch(() => null),
+        fetchObservabilityMetrics().catch(() => null),
       ]);
       setHistory(res.deployments);
       if (sec) setSecurityStatus(sec);
+      if (obs) setMetrics(obs);
     } catch {
       // Ignore if backend is restarting
     }
@@ -288,6 +295,22 @@ export default function Phase3DeployPage() {
     }
   }
 
+  async function handleRetry(deploymentId: string) {
+    setError(null);
+    setRetryingId(deploymentId);
+    setIsDeploying(true);
+    try {
+      const res = await retryFailedDeployment(deploymentId);
+      setDeployment(res.deployment);
+      await refreshHistory();
+    } catch (err: unknown) {
+      setIsDeploying(false);
+      setError(err instanceof Error ? err.message : 'Failed to retry deployment');
+    } finally {
+      setRetryingId(null);
+    }
+  }
+
   function handleCopy(urlToCopy: string) {
     navigator.clipboard.writeText(urlToCopy);
     setCopiedUrl(urlToCopy);
@@ -306,12 +329,12 @@ export default function Phase3DeployPage() {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="font-bold text-lg tracking-tight text-white">Repo2Cloud</h1>
-                <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                  Phase 1–7: All 4 AWS Targets + Build Isolation &amp; Cost Guardrails
+                <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  Phases 1–8 Complete: Multi-Target AWS Autonomous Deployer
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Multi-Target Recommendation Engine + S3/CF + ECS Fargate + Lambda + Amplify + Route 53 (maas-fam.com)
+                S3 + CloudFront OAC &bull; ECS Fargate &bull; Lambda + API GW v2 &bull; AWS Amplify &bull; Route 53 (maas-fam.com)
               </p>
             </div>
           </div>
@@ -321,43 +344,49 @@ export default function Phase3DeployPage() {
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-6 py-8 space-y-8">
-        {/* Phase 7 Build Isolation, Security Guardrails & Cost Quotas Banner */}
-        <div className="rounded-xl bg-[#0b1324] border border-emerald-500/30 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-semibold text-emerald-300 uppercase tracking-wider">
-              🛡 Phase 7 Guardrails Active:
-            </span>
-            <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300 font-mono">
-              AWS_* &amp; GITHUB_* Stripped
-            </span>
-            <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300 font-mono">
-              --ignore-scripts
-            </span>
-            <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300 font-mono">
-              Symlink &amp; Path Traversal Blocked
-            </span>
-            <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300 font-mono">
-              Cmd Injection Filter
-            </span>
+      <main className="max-w-5xl mx-auto px-6 py-8 space-y-6">
+        {/* Phase 7 & Phase 8 Security Guardrails + Real-Time Platform Observability */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div className="rounded-xl bg-[#0e1628] border border-slate-800 p-3.5">
+            <div className="text-[11px] uppercase tracking-wider text-slate-400">
+              Platform Success Rate
+            </div>
+            <div className="text-lg font-bold text-emerald-300 font-mono mt-0.5">
+              {metrics ? `${metrics.successRatePercent}%` : '100%'}{' '}
+              <span className="text-xs font-normal text-slate-400">
+                ({metrics?.totalDeployments ?? history.length} total)
+              </span>
+            </div>
           </div>
-          <div className="flex items-center gap-3 font-mono text-[11px] text-slate-300">
-            <span>
-              Live Quota:{' '}
-              <strong className="text-emerald-300">
-                {securityStatus
-                  ? `${securityStatus.quotas.activeLiveDeployments}/${securityStatus.quotas.maxActiveLiveDeployments}`
-                  : `${history.filter((d) => d.status === 'LIVE').length}/20`}
-              </strong>
-            </span>
-            <span>&bull;</span>
-            <span>
-              Max Repo: <strong>{securityStatus?.quotas.maxArchiveSizeMb ?? 100}MB</strong>
-            </span>
-            <span>&bull;</span>
-            <span>
-              Timeout: <strong>{securityStatus?.quotas.maxBuildDurationSec ?? 180}s</strong>
-            </span>
+          <div className="rounded-xl bg-[#0e1628] border border-slate-800 p-3.5">
+            <div className="text-[11px] uppercase tracking-wider text-slate-400">
+              Active Live Deployments
+            </div>
+            <div className="text-lg font-bold text-indigo-300 font-mono mt-0.5">
+              {securityStatus
+                ? `${securityStatus.quotas.activeLiveDeployments}/${securityStatus.quotas.maxActiveLiveDeployments}`
+                : `${history.filter((d) => d.status === 'LIVE').length}/20`}{' '}
+              <span className="text-xs font-normal text-slate-400">quota</span>
+            </div>
+          </div>
+          <div className="rounded-xl bg-[#0e1628] border border-slate-800 p-3.5">
+            <div className="text-[11px] uppercase tracking-wider text-slate-400">
+              Self-Healing Engine
+            </div>
+            <div className="text-lg font-bold text-amber-300 font-mono mt-0.5">
+              Active{' '}
+              <span className="text-xs font-normal text-slate-400">
+                ({metrics?.selfHealingRecoveries ?? 0} auto-heals)
+              </span>
+            </div>
+          </div>
+          <div className="rounded-xl bg-[#0e1628] border border-emerald-500/30 p-3.5">
+            <div className="text-[11px] uppercase tracking-wider text-emerald-300">
+              Phase 7 Sandbox Isolation
+            </div>
+            <div className="text-xs font-mono text-slate-200 mt-1 truncate">
+              AWS_* Stripped &bull; Symlink Guard
+            </div>
           </div>
         </div>
 
@@ -906,19 +935,83 @@ export default function Phase3DeployPage() {
                 </p>
               </div>
 
-              {deployment.status !== 'DELETED' && (
-                <button
-                  type="button"
-                  disabled={deletingId === deployment.deploymentId}
-                  onClick={() => handleDelete(deployment.deploymentId)}
-                  className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 transition disabled:opacity-50"
-                >
-                  {deletingId === deployment.deploymentId
-                    ? 'Deleting AWS Resources...'
-                    : 'Delete AWS Infrastructure'}
-                </button>
-              )}
+              <div className="flex items-center gap-2">
+                {deployment.status === 'FAILED' && (
+                  <button
+                    type="button"
+                    disabled={retryingId === deployment.deploymentId}
+                    onClick={() => handleRetry(deployment.deploymentId)}
+                    className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 transition disabled:opacity-50"
+                  >
+                    {retryingId === deployment.deploymentId
+                      ? 'Self-Healing...'
+                      : '⚡ Self-Heal & Retry'}
+                  </button>
+                )}
+                {deployment.status !== 'DELETED' && (
+                  <button
+                    type="button"
+                    disabled={deletingId === deployment.deploymentId}
+                    onClick={() => handleDelete(deployment.deploymentId)}
+                    className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 transition disabled:opacity-50"
+                  >
+                    {deletingId === deployment.deploymentId
+                      ? 'Deleting AWS Resources...'
+                      : 'Delete AWS Infrastructure'}
+                  </button>
+                )}
+              </div>
             </div>
+
+            {/* Phase 8: 4-Stage Autonomous Pipeline Checklist Progress Bar */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+              {[
+                {
+                  label: '1. Repo Inspected',
+                  done: deployment.checklist?.repositoryAnalyzed,
+                },
+                {
+                  label: '2. Sandbox Build',
+                  done: deployment.checklist?.buildCompleted,
+                },
+                {
+                  label: '3. AWS Provisioned',
+                  done: deployment.checklist?.cloudResourcesConfigured,
+                },
+                {
+                  label: '4. HTTPS Verified',
+                  done: deployment.checklist?.httpsAndDomainVerified,
+                },
+              ].map((step, idx) => (
+                <div
+                  key={idx}
+                  className={`rounded-lg px-3 py-2 border font-mono flex items-center justify-between ${
+                    step.done
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                      : 'bg-slate-950/70 border-slate-800 text-slate-400'
+                  }`}
+                >
+                  <span>{step.label}</span>
+                  <span>{step.done ? '✓' : '⋯'}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Phase 8 Remediation Guidance if FAILED */}
+            {deployment.status === 'FAILED' && deployment.error && (
+              <div className="rounded-xl bg-rose-500/10 border border-rose-500/30 p-4 text-xs space-y-1.5">
+                <div className="font-semibold text-rose-300">
+                  ✕ Failure in {deployment.error.phase} ({deployment.error.code}):{' '}
+                  {deployment.error.message}
+                </div>
+                {deployment.error.remediation && (
+                  <div className="text-amber-300">
+                    💡 <strong>Self-Healing / Remediation:</strong>{' '}
+                    {deployment.error.remediation}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Verified URLs (Only shown once status === LIVE) */}
             {deployment.status === 'LIVE' && deployment.url ? (

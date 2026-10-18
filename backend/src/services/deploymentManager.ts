@@ -22,6 +22,7 @@ import { sharedDomainManager } from './domainManager';
 import { isolatedBuildRunner } from './isolatedBuilder';
 import { repositoryAnalyzer } from './repositoryAnalyzer';
 import { securityGuardrails } from './securityGuardrails';
+import { selfHealingEngine } from './selfHealingEngine';
 
 export class DeploymentManager {
   private readonly store: DeploymentStore;
@@ -297,18 +298,56 @@ export class DeploymentManager {
       this.store.updateChecklist(deploymentId, { repositoryAnalyzed: true });
       await stepDelay(record.dryRun ? 300 : 50);
 
-      // Phase 1 Task 4: Build application in isolated build environment
-      const buildResult = await isolatedBuildRunner.runIsolatedBuild({
-        deploymentId,
-        workspaceDir: prep.workspaceDir,
-        repoDir: prep.repoDir,
-        clonedFromRemote: prep.clonedFromRemote,
-        repoUrl: record.repoUrl,
-        analysis,
-        userEnvVars,
-        dryRun: record.dryRun,
-        onLog: (msg) => this.store.addLog(deploymentId, 'BUILDING', 'INFO', msg),
-      });
+      // Phase 1 Task 4 & Phase 8 Self-Healing Build Loop
+      let buildResult;
+      try {
+        buildResult = await isolatedBuildRunner.runIsolatedBuild({
+          deploymentId,
+          workspaceDir: prep.workspaceDir,
+          repoDir: prep.repoDir,
+          clonedFromRemote: prep.clonedFromRemote,
+          repoUrl: record.repoUrl,
+          analysis,
+          userEnvVars,
+          dryRun: record.dryRun,
+          onLog: (msg) => this.store.addLog(deploymentId, 'BUILDING', 'INFO', msg),
+        });
+      } catch (buildErr: unknown) {
+        const msg = buildErr instanceof Error ? buildErr.message : String(buildErr);
+        const diagnosis = selfHealingEngine.diagnoseFailure(msg, 'BUILDING', analysis);
+        if (diagnosis.autoRemediable) {
+          const nextRetry = (this.store.get(deploymentId)?.retryCount || 0) + 1;
+          if (diagnosis.patchedAnalysis) {
+            Object.assign(analysis, diagnosis.patchedAnalysis);
+          }
+          this.store.update(deploymentId, { retryCount: nextRetry, analysis });
+          this.store.addLog(
+            deploymentId,
+            'BUILDING',
+            'WARN',
+            `[Phase 8 Self-Healing] Detected ${diagnosis.errorCode}: ${
+              diagnosis.remediationApplied || 'Applying automatic build fallback...'
+            } (Attempt #${nextRetry + 1})`
+          );
+          buildResult = await isolatedBuildRunner.runIsolatedBuild({
+            deploymentId,
+            workspaceDir: prep.workspaceDir,
+            repoDir: prep.repoDir,
+            clonedFromRemote: prep.clonedFromRemote,
+            repoUrl: record.repoUrl,
+            analysis: {
+              ...analysis,
+              outputDirectory: diagnosis.patchedAnalysis?.outputDirectory || '.',
+              buildCommand: null,
+            },
+            userEnvVars,
+            dryRun: record.dryRun,
+            onLog: (m) => this.store.addLog(deploymentId, 'BUILDING', 'INFO', m),
+          });
+        } else {
+          throw buildErr;
+        }
+      }
 
       this.store.updateChecklist(deploymentId, { buildCompleted: true });
       this.store.addLog(
@@ -339,13 +378,17 @@ export class DeploymentManager {
         this.store.updateResources(deploymentId, { acmCertificateArn });
       }
 
-      // Phase 1 Tasks 5 & 6 / Phase 4 Tasks 2–5: Deploy to target AWS architecture
-      setStatus(
-        'DEPLOYING',
+      // Phase 1–6: Deploy to target AWS architecture
+      const deployStatusMsg =
         latestRecord.target === 'ECS_FARGATE'
           ? 'Provisioning Amazon ECR repository, ECS Cluster, Fargate Task Definition, and ALB routing...'
-          : 'Uploading static assets to private S3 bucket and creating CloudFront OAC distribution...'
-      );
+          : latestRecord.target === 'LAMBDA_API_GATEWAY'
+          ? 'Packaging PKZIP archive, provisioning AWS Lambda Function, and configuring API Gateway v2 HTTP API...'
+          : latestRecord.target === 'AMPLIFY'
+          ? 'Provisioning AWS Amplify Hosting App (WEB_COMPUTE) and production branch...'
+          : 'Uploading static assets to private S3 bucket and creating CloudFront OAC distribution...';
+
+      setStatus('DEPLOYING', deployStatusMsg);
 
       const deployOutput = await deployer.deploy({
         deployment: this.store.get(deploymentId)!,
@@ -432,7 +475,8 @@ export class DeploymentManager {
     } catch (err: unknown) {
       const errorObj = err as Error & { code?: string; remediation?: string };
       const message = errorObj?.message || 'Deployment failed.';
-      const code = errorObj?.code || 'DEPLOYMENT_FAILED';
+      const diagnosis = selfHealingEngine.diagnoseFailure(message, currentPhase);
+      const code = errorObj?.code || diagnosis.errorCode || 'DEPLOYMENT_FAILED';
 
       this.store.addLog(deploymentId, currentPhase, 'ERROR', message);
       this.store.update(deploymentId, {
@@ -442,12 +486,65 @@ export class DeploymentManager {
           code,
           message,
           phase: currentPhase,
-          remediation: errorObj?.remediation,
+          remediation: errorObj?.remediation || diagnosis.remediationAdvice,
         },
       });
     } finally {
       isolatedBuildRunner.cleanupWorkspace(workspaceDir);
     }
+  }
+
+  /**
+   * Phase 8: Manual 1-Click Self-Healing Retry for a FAILED deployment.
+   */
+  public async retryDeployment(deploymentId: string): Promise<{
+    ok: boolean;
+    statusCode: number;
+    deployment?: DeploymentRecord;
+    error?: string;
+  }> {
+    const existing = this.store.get(deploymentId);
+    if (!existing) {
+      return { ok: false, statusCode: 404, error: `Deployment "${deploymentId}" not found.` };
+    }
+    if (existing.status !== 'FAILED') {
+      return {
+        ok: false,
+        statusCode: 400,
+        error: `Only FAILED deployments can be retried (current status: ${existing.status}).`,
+      };
+    }
+
+    let domainConfig: ConfiguredDomain | undefined;
+    if (existing.subdomain) {
+      const domCheck = resolveServerControlledDomain(existing.domain);
+      if (domCheck.valid && domCheck.domainConfig) {
+        domainConfig = domCheck.domainConfig;
+      }
+    }
+
+    const nextRetryCount = (existing.retryCount || 0) + 1;
+    const updated = this.store.update(deploymentId, {
+      status: 'BUILDING',
+      error: null,
+      url: null,
+      retryCount: nextRetryCount,
+    });
+
+    this.store.addLog(
+      deploymentId,
+      'BUILDING',
+      'INFO',
+      `[Phase 8 Self-Healing] Initiating manual retry #${nextRetryCount} for ${existing.repoUrl}...`
+    );
+
+    void this.executePipeline(deploymentId, `${existing.repoUrl}.git`, domainConfig);
+
+    return {
+      ok: true,
+      statusCode: 202,
+      deployment: updated,
+    };
   }
 
   /**

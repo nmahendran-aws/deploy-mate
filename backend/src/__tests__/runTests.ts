@@ -9,6 +9,7 @@ import { DeploymentManager } from '../services/deploymentManager';
 import { isolatedBuildRunner } from '../services/isolatedBuilder';
 import { RepositoryAnalyzer } from '../services/repositoryAnalyzer';
 import { securityGuardrails } from '../services/securityGuardrails';
+import { selfHealingEngine } from '../services/selfHealingEngine';
 import { DeploymentStore } from '../store/deploymentStore';
 import {
   resolveServerControlledDomain,
@@ -380,12 +381,38 @@ async function runPhase1To3Tests(): Promise<void> {
   assert.strictEqual(secStatus.isolation.awsCredentialsStripped, true);
   assert.strictEqual(secStatus.isolation.symlinkEscapeProtection, true);
   assert.strictEqual(secStatus.isolation.commandInjectionFilter, true);
+  console.log('   ✓ Phase 7 build isolation, command/path filters, symlink escape protection & quotas verified.');
+
+  // Phase 8: Self-Healing Engine & Real-Time Platform Observability Metrics
+  console.log('9. Testing Phase 8 (Self-Healing Failure Diagnosis, Auto-Remediation & Platform Observability Metrics)...');
+  const diagEmptyOut = selfHealingEngine.diagnoseFailure(
+    'Build finished but output directory "dist/" is empty.',
+    'BUILDING'
+  );
+  assert.strictEqual(diagEmptyOut.errorCode, 'EMPTY_OUTPUT_DIRECTORY');
+  assert.strictEqual(diagEmptyOut.autoRemediable, true);
+  assert.strictEqual(diagEmptyOut.patchedAnalysis?.outputDirectory, '.');
+
+  const diagIam = selfHealingEngine.diagnoseFailure(
+    'The role defined for the function cannot be assumed by Lambda.',
+    'DEPLOYING'
+  );
+  assert.strictEqual(diagIam.errorCode, 'TRANSIENT_CLOUD_PROPAGATION');
+  assert.strictEqual(diagIam.autoRemediable, true);
+
+  const metrics = selfHealingEngine.computeMetrics(store);
+  assert.strictEqual(metrics.totalDeployments, 4, 'Expected all 4 target deployments recorded in metrics');
+  assert.strictEqual(metrics.successRatePercent, 100, 'Expected 100% success rate across all 4 targets');
+  assert.strictEqual(metrics.byTarget.S3_CLOUDFRONT, 1);
+  assert.strictEqual(metrics.byTarget.ECS_FARGATE, 1);
+  assert.strictEqual(metrics.byTarget.LAMBDA_API_GATEWAY, 1);
+  assert.strictEqual(metrics.byTarget.AMPLIFY, 1);
 
   if (fs.existsSync(tmpStoreFile)) {
     fs.unlinkSync(tmpStoreFile);
   }
-  console.log('   ✓ Phase 7 build isolation, command/path filters, symlink escape protection & quotas verified.\n');
-  console.log('ALL PHASE 1, PHASE 2, PHASE 3, PHASE 4, PHASE 5, PHASE 6 & PHASE 7 TESTS PASSED!');
+  console.log('   ✓ Phase 8 Self-Healing diagnosis & platform observability metrics verified across all 4 AWS targets.\n');
+  console.log('ALL PHASE 1, PHASE 2, PHASE 3, PHASE 4, PHASE 5, PHASE 6, PHASE 7 & PHASE 8 TESTS PASSED!');
 }
 
 runPhase1To3Tests().catch((err) => {
