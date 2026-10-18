@@ -112,24 +112,30 @@ export class S3CloudFrontDeployer implements IDeployer {
     ctx.onLog(
       `Uploading ${ctx.buildResult.generatedFiles.length} static asset(s) to private bucket s3://${bucketName}/...`
     );
-    for (const relFile of ctx.buildResult.generatedFiles) {
-      const fullPath = path.join(ctx.buildResult.artifactDir, relFile);
-      const s3Key = relFile.split(path.sep).join('/');
-      const ext = path.extname(relFile).toLowerCase();
-      const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-      const cacheControl =
-        ext === '.html'
-          ? 'public, max-age=0, must-revalidate'
-          : 'public, max-age=31536000, immutable';
+    const BATCH_SIZE = 20;
+    for (let i = 0; i < ctx.buildResult.generatedFiles.length; i += BATCH_SIZE) {
+      const batch = ctx.buildResult.generatedFiles.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        batch.map(async (relFile) => {
+          const fullPath = path.join(ctx.buildResult.artifactDir, relFile);
+          const s3Key = relFile.split(path.sep).join('/');
+          const ext = path.extname(relFile).toLowerCase();
+          const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+          const cacheControl =
+            ext === '.html'
+              ? 'public, max-age=0, must-revalidate'
+              : 'public, max-age=31536000, immutable';
 
-      const body = fs.readFileSync(fullPath);
-      await s3.send(
-        new PutObjectCommand({
-          Bucket: bucketName,
-          Key: s3Key,
-          Body: body,
-          ContentType: contentType,
-          CacheControl: cacheControl,
+          const body = fs.readFileSync(fullPath);
+          return s3.send(
+            new PutObjectCommand({
+              Bucket: bucketName,
+              Key: s3Key,
+              Body: body,
+              ContentType: contentType,
+              CacheControl: cacheControl,
+            })
+          );
         })
       );
     }

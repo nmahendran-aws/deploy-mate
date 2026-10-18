@@ -642,7 +642,12 @@ def handler(event, context):
     const results: string[] = [];
     if (!fs.existsSync(dir)) return results;
 
+    const IGNORED_NAMES = new Set(['node_modules', '.git', '.next', '.repo2cloud-builds', '.turbo', '.cache']);
+
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (IGNORED_NAMES.has(entry.name)) {
+        continue;
+      }
       const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         results.push(...this.listFilesRecursively(fullPath, rootDir));
