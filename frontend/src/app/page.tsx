@@ -150,31 +150,31 @@ const THEME_CONFIG: Record<
   }
 > = {
   aurora: {
-    name: 'Aurora Cyber',
-    bgMain: 'bg-[#050814]',
-    orb1: 'bg-indigo-600/20',
-    orb2: 'bg-cyan-500/15',
-    orb3: 'bg-fuchsia-600/15',
-    primaryBtn: 'from-indigo-500 via-cyan-500 to-emerald-500',
-    headerBadge: 'from-indigo-500/20 to-emerald-500/20 text-cyan-200 border-cyan-500/30',
+    name: 'Obsidian Velvet',
+    bgMain: 'bg-[#090a0f]',
+    orb1: 'bg-purple-600/15',
+    orb2: 'bg-indigo-500/15',
+    orb3: 'bg-emerald-500/10',
+    primaryBtn: 'from-purple-500 via-indigo-500 to-emerald-400',
+    headerBadge: 'from-purple-500/20 to-indigo-500/20 text-purple-200 border-purple-500/30',
   },
   'aws-sunset': {
-    name: 'AWS Executive',
-    bgMain: 'bg-[#090712]',
-    orb1: 'bg-amber-500/20',
+    name: 'Midnight Amber',
+    bgMain: 'bg-[#0a0a0e]',
+    orb1: 'bg-amber-500/15',
     orb2: 'bg-rose-600/15',
-    orb3: 'bg-violet-600/20',
+    orb3: 'bg-orange-500/15',
     primaryBtn: 'from-amber-500 via-orange-500 to-rose-500',
     headerBadge: 'from-amber-500/20 to-rose-500/20 text-amber-200 border-amber-500/30',
   },
   oceanic: {
-    name: 'Emerald Ocean',
-    bgMain: 'bg-[#040d12]',
-    orb1: 'bg-emerald-500/20',
+    name: 'Emerald Matrix',
+    bgMain: 'bg-[#070908]',
+    orb1: 'bg-emerald-500/15',
     orb2: 'bg-teal-500/15',
-    orb3: 'bg-sky-500/20',
-    primaryBtn: 'from-emerald-500 via-teal-500 to-cyan-500',
-    headerBadge: 'from-emerald-500/20 to-cyan-500/20 text-emerald-200 border-emerald-500/30',
+    orb3: 'bg-lime-500/10',
+    primaryBtn: 'from-emerald-500 via-teal-500 to-emerald-400',
+    headerBadge: 'from-emerald-500/20 to-teal-500/20 text-emerald-200 border-emerald-500/30',
   },
 };
 
@@ -458,13 +458,13 @@ export default function Phase3DeployPage() {
               className={`h-11 w-11 rounded-xl bg-gradient-to-br ${currentTheme.primaryBtn} animate-gradient-x p-[1px] shadow-lg shadow-indigo-500/20`}
             >
               <div className="h-full w-full rounded-[11px] bg-slate-950/80 flex items-center justify-center font-extrabold text-sm tracking-tighter bg-clip-text text-transparent bg-gradient-to-br from-white via-cyan-200 to-emerald-300">
-                R2C
+                DM
               </div>
             </div>
             <div>
               <div className="flex flex-wrap items-center gap-2.5">
                 <h1 className="font-extrabold text-xl tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-100 to-cyan-300">
-                  Repo2Cloud
+                  DeployMate
                 </h1>
                 <span
                   className={`text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-gradient-to-r ${currentTheme.headerBadge} border shadow-sm`}
@@ -713,7 +713,7 @@ export default function Phase3DeployPage() {
             <div className="rounded-2xl bg-slate-900/80 border border-white/10 p-6 shadow-2xl backdrop-blur space-y-5">
               <div>
                 <h3 className="text-base font-bold text-white">
-                  💰 Interactive Cloud Cost &amp; Seat Tax Calculator (Repo2Cloud vs. Vercel vs. Netlify)
+                  💰 Interactive Cloud Cost &amp; Seat Tax Calculator (DeployMate vs. Vercel vs. Netlify)
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
                   Drag the sliders to show judges how much teams save by deploying directly to raw AWS primitives without per-seat or bandwidth markups.
@@ -756,7 +756,7 @@ export default function Phase3DeployPage() {
 
                 <div className="grid grid-cols-3 gap-3">
                   <div className="rounded-xl bg-gradient-to-b from-emerald-500/20 to-slate-950 border border-emerald-400/50 p-4 flex flex-col justify-between">
-                    <div className="text-xs font-bold text-emerald-300 uppercase">Repo2Cloud (AWS)</div>
+                    <div className="text-xs font-bold text-emerald-300 uppercase">DeployMate (AWS)</div>
                     <div className="text-2xl font-extrabold text-white font-mono my-2">
                       ${repo2CloudMonthlyCost}
                       <span className="text-xs font-normal text-slate-400">/mo</span>
@@ -799,10 +799,10 @@ export default function Phase3DeployPage() {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h2 className="text-lg font-bold text-white">
-                  🏆 Why Repo2Cloud Beats Vercel &amp; Netlify
+                  🏆 Why DeployMate Beats Vercel &amp; Netlify
                 </h2>
                 <p className="text-xs text-slate-400">
-                  Vercel and Netlify rent you a costly wrapper around AWS. Repo2Cloud gives you Vercel&apos;s 1-click DX directly inside your own AWS account.
+                  Vercel and Netlify rent you a costly wrapper around AWS. DeployMate gives you Vercel&apos;s 1-click DX directly inside your own AWS account.
                 </p>
               </div>
               <button
@@ -820,7 +820,7 @@ export default function Phase3DeployPage() {
                   <tr className="border-b border-slate-800 text-slate-300 uppercase tracking-wider">
                     <th className="py-3 px-4">Capability</th>
                     <th className="py-3 px-4 text-emerald-300 bg-emerald-500/10 rounded-t-xl">
-                      🚀 Repo2Cloud (Ours)
+                      🚀 DeployMate (Ours)
                     </th>
                     <th className="py-3 px-4 text-slate-400">▲ Vercel</th>
                     <th className="py-3 px-4 text-slate-400">◆ Netlify</th>
