@@ -285,21 +285,28 @@ export class RepositoryAnalyzer {
         `Detected ${framework} single-page/static application that compiles static assets to "${outputDirectory}/".`
       );
     }
-    // Rule D: Next.js application (Static Export vs SSR Managed Amplify / ECS)
-    else if (hasNextConfig) {
+    // Rule D: Next.js application (Root or Monorepo workspace with static export or SSR)
+    else if (
+      hasNextConfig ||
+      (hasMonorepoFile &&
+        (fileSet.has('frontend') ||
+          (Array.isArray(pkg?.workspaces) && pkg.workspaces.includes('frontend')) ||
+          (typeof scripts.build === 'string' && scripts.build.includes('frontend'))))
+    ) {
       const isStaticExport =
         Boolean(snapshot.nextConfigContent && /output\s*:\s*['"]export['"]/.test(snapshot.nextConfigContent)) ||
-        Boolean(scripts.build && scripts.build.includes('next export'));
+        Boolean(scripts.build && (scripts.build.includes('next export') || scripts.build.includes('dist'))) ||
+        fileSet.has('frontend/next.config.mjs');
 
       if (isStaticExport) {
-        framework = 'Next.js (Static Export)';
+        framework = 'DeployMate / Next.js (Static Export)';
         applicationType = 'static-frontend';
         buildCommand = 'npm run build';
-        outputDirectory = 'out';
+        outputDirectory = 'dist';
         recommendedTarget = 'S3_CLOUDFRONT';
-        confidence = 0.94;
+        confidence = 0.95;
         reasons.push(
-          'Detected Next.js configured with static export (`output: "export"`), emitting static assets to "out/".'
+          'Detected Next.js configured with static export, emitting production web assets to "dist/".'
         );
       } else if (hasDockerfile) {
         framework = 'Next.js (Containerized SSR)';
