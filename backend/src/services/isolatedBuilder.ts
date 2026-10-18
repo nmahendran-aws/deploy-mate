@@ -100,6 +100,19 @@ export class IsolatedBuildRunner {
       }
 
       const arrayBuffer = await res.arrayBuffer();
+      const maxArchiveBytes = Number(
+        process.env.MAX_ARCHIVE_SIZE_BYTES || 100 * 1024 * 1024
+      );
+      if (arrayBuffer.byteLength > maxArchiveBytes) {
+        throw new Error(
+          `Phase 7 Resource Guardrail: Repository archive (${(
+            arrayBuffer.byteLength /
+            (1024 * 1024)
+          ).toFixed(1)} MB) exceeds maximum allowed limit of ${Math.round(
+            maxArchiveBytes / (1024 * 1024)
+          )} MB.`
+        );
+      }
       fs.writeFileSync(archivePath, Buffer.from(arrayBuffer));
 
       const tarRes = await this.runSandboxedCommand(
@@ -114,7 +127,11 @@ export class IsolatedBuildRunner {
         );
       }
 
-      onLog?.('Repository archive downloaded and extracted into isolated sandbox.');
+      this.verifyWorkspaceSafety(repoDir);
+
+      onLog?.(
+        'Repository archive downloaded, extracted, and verified against symlink escape and quota limits.'
+      );
       return { workspaceDir, repoDir, clonedFromRemote: true };
     }
 
@@ -288,6 +305,61 @@ CMD ["node", "${entryPoint}"]
 
     fs.writeFileSync(dockerfilePath, generated, 'utf-8');
     return dockerfilePath;
+  }
+
+  /**
+   * Ensures a production amplify.yml build specification exists for Phase 6 AWS Amplify Hosting.
+   */
+  public ensureAmplifyBuildSpec(params: {
+    repoDir: string;
+    analysis: AnalysisResult;
+    buildCommandOverride?: string | null;
+    outputDirOverride?: string | null;
+  }): { amplifyYmlPath: string; buildSpecContent: string; platform: 'WEB_COMPUTE' | 'WEB' } {
+    const amplifyYmlPath = path.join(params.repoDir, 'amplify.yml');
+    const isNextSsr =
+      params.analysis.framework.toLowerCase().includes('next') &&
+      params.analysis.applicationType === 'ssr-frontend';
+    const platform: 'WEB_COMPUTE' | 'WEB' =
+      isNextSsr || params.analysis.applicationType === 'ssr-frontend'
+        ? 'WEB_COMPUTE'
+        : 'WEB';
+
+    if (fs.existsSync(amplifyYmlPath)) {
+      const existing = fs.readFileSync(amplifyYmlPath, 'utf-8');
+      return { amplifyYmlPath, buildSpecContent: existing, platform };
+    }
+
+    const buildCmd =
+      params.buildCommandOverride ||
+      params.analysis.buildCommand ||
+      'npm run build';
+    const baseDir =
+      params.outputDirOverride ||
+      params.analysis.outputDirectory ||
+      (isNextSsr ? '.next' : 'dist');
+
+    const buildSpecContent = `version: 1
+frontend:
+  phases:
+    preBuild:
+      commands:
+        - npm ci --ignore-scripts
+    build:
+      commands:
+        - ${buildCmd}
+  artifacts:
+    baseDirectory: ${baseDir}
+    files:
+      - '**/*'
+  cache:
+    paths:
+      - node_modules/**/*
+      - .next/cache/**/*
+`;
+
+    fs.writeFileSync(amplifyYmlPath, buildSpecContent, 'utf-8');
+    return { amplifyYmlPath, buildSpecContent, platform };
   }
 
   /**
@@ -505,6 +577,65 @@ def handler(event, context):
     if (analysis.recommendedTarget === 'ECS_FARGATE') {
       this.ensureProductionDockerfile(repoDir, analysis);
     }
+  }
+
+  /**
+   * Phase 7 Security Guardrail:
+   * Scans the workspace directory for symlinks pointing outside the repository root
+   * and enforces maximum extracted file count to prevent zip-bombs or host file exfiltration.
+   */
+  public verifyWorkspaceSafety(rootDir: string): { fileCount: number } {
+    const resolvedRoot = fs.realpathSync(rootDir);
+    const maxFiles = Number(process.env.MAX_EXTRACTED_FILES || 5_000);
+    let fileCount = 0;
+
+    const walk = (currentDir: string) => {
+      for (const entry of fs.readdirSync(currentDir, { withFileTypes: true })) {
+        fileCount++;
+        if (fileCount > maxFiles) {
+          throw new Error(
+            `Phase 7 Resource Guardrail: Workspace exceeds maximum allowed file count (${maxFiles} files).`
+          );
+        }
+
+        const fullPath = path.join(currentDir, entry.name);
+        const lstat = fs.lstatSync(fullPath);
+
+        if (lstat.isSymbolicLink()) {
+          let targetRealPath: string;
+          try {
+            targetRealPath = fs.realpathSync(fullPath);
+          } catch {
+            throw new Error(
+              `Phase 7 Security Guardrail: Broken or unresolvable symlink detected at "${path.relative(
+                rootDir,
+                fullPath
+              )}".`
+            );
+          }
+
+          if (
+            targetRealPath !== resolvedRoot &&
+            !targetRealPath.startsWith(resolvedRoot + path.sep)
+          ) {
+            throw new Error(
+              `Phase 7 Security Guardrail: Symlink escape blocked at "${path.relative(
+                rootDir,
+                fullPath
+              )}" (points outside isolated workspace).`
+            );
+          }
+        } else if (lstat.isDirectory()) {
+          walk(fullPath);
+        }
+      }
+    };
+
+    if (fs.existsSync(rootDir)) {
+      walk(rootDir);
+    }
+
+    return { fileCount };
   }
 
   private listFilesRecursively(dir: string, rootDir: string): string[] {

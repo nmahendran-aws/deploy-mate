@@ -48,3 +48,8 @@ output "lambda_execution_role_arn" {
   value       = aws_iam_role.lambda_execution_role.arn
 }
 
+output "amplify_service_role_arn" {
+  description = "Phase 6 AWS Amplify compute service role ARN"
+  value       = aws_iam_role.amplify_service_role.arn
+}
+

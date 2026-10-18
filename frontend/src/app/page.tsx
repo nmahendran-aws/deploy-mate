@@ -9,8 +9,10 @@ import {
   DeploymentRecord,
   DeploymentTarget,
   fetchDomainsAndCheckSubdomain,
+  fetchSecurityStatus,
   getDeploymentStatus,
   listDeployments,
+  SecurityGuardrailsStatus,
 } from '@/lib/api';
 
 const SAMPLE_REPOS: Array<{ label: string; url: string; tag: string }> = [
@@ -73,8 +75,8 @@ const DEFAULT_TARGET_META: Array<{
     target: 'AMPLIFY',
     title: 'AWS Amplify Hosting',
     subtitle: 'Managed Full-Stack & Next.js SSR',
-    phaseBadge: 'Phase 6 Target',
-    isLiveReady: false,
+    phaseBadge: 'Phase 6 Active',
+    isLiveReady: true,
   },
 ];
 
@@ -113,6 +115,7 @@ export default function Phase3DeployPage() {
   // Active Deployment & History State
   const [deployment, setDeployment] = useState<DeploymentRecord | null>(null);
   const [history, setHistory] = useState<DeploymentRecord[]>([]);
+  const [securityStatus, setSecurityStatus] = useState<SecurityGuardrailsStatus | null>(null);
   const [isDeploying, setIsDeploying] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -120,8 +123,12 @@ export default function Phase3DeployPage() {
 
   const refreshHistory = useCallback(async () => {
     try {
-      const res = await listDeployments();
+      const [res, sec] = await Promise.all([
+        listDeployments(),
+        fetchSecurityStatus().catch(() => null),
+      ]);
       setHistory(res.deployments);
+      if (sec) setSecurityStatus(sec);
     } catch {
       // Ignore if backend is restarting
     }
@@ -300,11 +307,11 @@ export default function Phase3DeployPage() {
               <div className="flex items-center gap-2">
                 <h1 className="font-bold text-lg tracking-tight text-white">Repo2Cloud</h1>
                 <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                  Phase 1–5: S3+CloudFront, ECS Fargate &amp; Lambda + API Gateway
+                  Phase 1–7: All 4 AWS Targets + Build Isolation &amp; Cost Guardrails
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Multi-Target Recommendation Engine + AWS Lambda/API GW v2 + ECR/ECS Fargate + S3/CloudFront + Route 53 (maas-fam.com)
+                Multi-Target Recommendation Engine + S3/CF + ECS Fargate + Lambda + Amplify + Route 53 (maas-fam.com)
               </p>
             </div>
           </div>
@@ -315,6 +322,45 @@ export default function Phase3DeployPage() {
       </header>
 
       <main className="max-w-5xl mx-auto px-6 py-8 space-y-8">
+        {/* Phase 7 Build Isolation, Security Guardrails & Cost Quotas Banner */}
+        <div className="rounded-xl bg-[#0b1324] border border-emerald-500/30 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-semibold text-emerald-300 uppercase tracking-wider">
+              🛡 Phase 7 Guardrails Active:
+            </span>
+            <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300 font-mono">
+              AWS_* &amp; GITHUB_* Stripped
+            </span>
+            <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300 font-mono">
+              --ignore-scripts
+            </span>
+            <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300 font-mono">
+              Symlink &amp; Path Traversal Blocked
+            </span>
+            <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-300 font-mono">
+              Cmd Injection Filter
+            </span>
+          </div>
+          <div className="flex items-center gap-3 font-mono text-[11px] text-slate-300">
+            <span>
+              Live Quota:{' '}
+              <strong className="text-emerald-300">
+                {securityStatus
+                  ? `${securityStatus.quotas.activeLiveDeployments}/${securityStatus.quotas.maxActiveLiveDeployments}`
+                  : `${history.filter((d) => d.status === 'LIVE').length}/20`}
+              </strong>
+            </span>
+            <span>&bull;</span>
+            <span>
+              Max Repo: <strong>{securityStatus?.quotas.maxArchiveSizeMb ?? 100}MB</strong>
+            </span>
+            <span>&bull;</span>
+            <span>
+              Timeout: <strong>{securityStatus?.quotas.maxBuildDurationSec ?? 180}s</strong>
+            </span>
+          </div>
+        </div>
+
         {/* Phase 1, 2 & 3 Dynamic Deployment Form */}
         <form
           onSubmit={handleDeploy}
@@ -955,7 +1001,32 @@ export default function Phase3DeployPage() {
             )}
 
             {/* Provisioned AWS & Route 53 Resources */}
-            {deployment.target === 'LAMBDA_API_GATEWAY' ? (
+            {deployment.target === 'AMPLIFY' ? (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <div className="rounded-xl bg-slate-950/80 border border-slate-800/80 p-3">
+                  <div className="text-slate-400">AWS Amplify App ID</div>
+                  <div className="font-mono text-slate-200 mt-1 truncate">
+                    {deployment.resources.amplifyAppId || 'Pending...'}
+                  </div>
+                </div>
+                <div className="rounded-xl bg-slate-950/80 border border-slate-800/80 p-3">
+                  <div className="text-slate-400">Amplify Branch &amp; Compute</div>
+                  <div className="font-mono text-slate-200 mt-1 truncate">
+                    {deployment.resources.amplifyBranchName
+                      ? `${deployment.resources.amplifyBranchName} (WEB_COMPUTE SSR)`
+                      : 'Pending...'}
+                  </div>
+                </div>
+                <div className="rounded-xl bg-slate-950/80 border border-slate-800/80 p-3">
+                  <div className="text-slate-400">Route 53 Custom Domain / CDN</div>
+                  <div className="font-mono text-slate-200 mt-1 truncate">
+                    {deployment.resources.route53RecordName
+                      ? `${deployment.resources.route53RecordName} -> Amplify`
+                      : deployment.infrastructureUrl || 'Default (*.amplifyapp.com)'}
+                  </div>
+                </div>
+              </div>
+            ) : deployment.target === 'LAMBDA_API_GATEWAY' ? (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                 <div className="rounded-xl bg-slate-950/80 border border-slate-800/80 p-3">
                   <div className="text-slate-400">AWS Lambda Function</div>

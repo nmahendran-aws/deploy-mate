@@ -356,11 +356,29 @@ export function sanitizeUserEnvVars(
       };
     }
 
-    if (BLOCKED_ENV_KEYS.has(trimmedKey.toUpperCase())) {
+    const upperKey = trimmedKey.toUpperCase();
+    if (
+      BLOCKED_ENV_KEYS.has(upperKey) ||
+      upperKey.startsWith('AWS_') ||
+      upperKey.startsWith('GITHUB_') ||
+      upperKey.startsWith('LD_') ||
+      upperKey.startsWith('DYLD_') ||
+      upperKey === 'BASH_ENV' ||
+      upperKey === 'ENV' ||
+      upperKey === 'IFS'
+    ) {
       return {
         valid: false,
         sanitized: {},
-        error: `Environment variable "${trimmedKey}" is restricted for security reasons.`,
+        error: `Environment variable "${trimmedKey}" is restricted by Phase 7 security guardrails.`,
+      };
+    }
+
+    if (String(value ?? '').includes('\0')) {
+      return {
+        valid: false,
+        sanitized: {},
+        error: `Environment variable "${trimmedKey}" contains illegal null bytes.`,
       };
     }
 
@@ -369,3 +387,136 @@ export function sanitizeUserEnvVars(
 
   return { valid: true, sanitized };
 }
+
+/**
+ * Phase 7 Security Guardrail:
+ * Validates user-supplied build command overrides, output directories, health check paths,
+ * and Lambda handlers against command injection and path traversal attacks.
+ */
+export function validateBuildOverrides(params: {
+  buildCommandOverride?: unknown;
+  outputDirOverride?: unknown;
+  healthCheckPath?: unknown;
+  lambdaHandler?: unknown;
+  containerPort?: unknown;
+}): { valid: boolean; error?: string } {
+  // 1. Validate buildCommandOverride against shell metacharacters & arbitrary binaries
+  if (
+    params.buildCommandOverride !== undefined &&
+    params.buildCommandOverride !== null &&
+    String(params.buildCommandOverride).trim() !== ''
+  ) {
+    if (typeof params.buildCommandOverride !== 'string') {
+      return { valid: false, error: 'buildCommandOverride must be a string.' };
+    }
+    const cmd = params.buildCommandOverride.trim();
+    if (cmd.length > 160) {
+      return {
+        valid: false,
+        error: 'buildCommandOverride exceeds maximum length of 160 characters.',
+      };
+    }
+
+    // Block shell metacharacters, subshells, redirection, and chaining
+    if (/[;&|`$><\n\r\\]/.test(cmd) || cmd.includes('..')) {
+      return {
+        valid: false,
+        error:
+          'Phase 7 Security Guardrail: buildCommandOverride contains forbidden shell metacharacters (; & | ` $ > < \\ ..).',
+      };
+    }
+
+    // Allow only standard frontend/backend build tool invocations
+    const allowedPrefixRegex =
+      /^(npm\s+(run\s+[a-zA-Z0-9:_-]+|build)|npx\s+(vite|next|tsc|astro)\s+build|yarn\s+(run\s+)?[a-zA-Z0-9:_-]+|pnpm\s+(run\s+)?[a-zA-Z0-9:_-]+|next\s+build|vite\s+build|tsc(\s+-b)?)$/;
+    if (!allowedPrefixRegex.test(cmd)) {
+      return {
+        valid: false,
+        error:
+          'Phase 7 Security Guardrail: buildCommandOverride must be a standard build command (e.g., "npm run build", "vite build", "next build"). Arbitrary shell commands are blocked.',
+      };
+    }
+  }
+
+  // 2. Validate outputDirOverride against path traversal & absolute paths
+  if (
+    params.outputDirOverride !== undefined &&
+    params.outputDirOverride !== null &&
+    String(params.outputDirOverride).trim() !== ''
+  ) {
+    if (typeof params.outputDirOverride !== 'string') {
+      return { valid: false, error: 'outputDirOverride must be a string.' };
+    }
+    const outDir = params.outputDirOverride.trim();
+    if (outDir.length > 100) {
+      return { valid: false, error: 'outputDirOverride exceeds maximum length.' };
+    }
+    if (
+      outDir.startsWith('/') ||
+      outDir.startsWith('~') ||
+      outDir.includes('..') ||
+      outDir.includes('\\') ||
+      outDir.includes('\0') ||
+      outDir === '.git' ||
+      outDir.startsWith('.git/')
+    ) {
+      return {
+        valid: false,
+        error:
+          'Phase 7 Security Guardrail: outputDirOverride must be a relative directory inside the repository and cannot contain "..", leading "/", or ".git".',
+      };
+    }
+    if (outDir !== '.' && !/^[a-zA-Z0-9._/-]+$/.test(outDir)) {
+      return {
+        valid: false,
+        error: 'outputDirOverride contains invalid characters.',
+      };
+    }
+  }
+
+  // 3. Validate healthCheckPath
+  if (
+    params.healthCheckPath !== undefined &&
+    params.healthCheckPath !== null &&
+    String(params.healthCheckPath).trim() !== ''
+  ) {
+    const hc = String(params.healthCheckPath).trim();
+    if (!/^\/[a-zA-Z0-9._/-]{0,120}$/.test(hc) || hc.includes('..')) {
+      return {
+        valid: false,
+        error:
+          'Phase 7 Security Guardrail: healthCheckPath must start with "/" and contain only safe URL path characters.',
+      };
+    }
+  }
+
+  // 4. Validate lambdaHandler
+  if (
+    params.lambdaHandler !== undefined &&
+    params.lambdaHandler !== null &&
+    String(params.lambdaHandler).trim() !== ''
+  ) {
+    const lh = String(params.lambdaHandler).trim();
+    if (!/^[a-zA-Z0-9_/-]{1,64}\.[a-zA-Z0-9_]{1,64}$/.test(lh) || lh.includes('..')) {
+      return {
+        valid: false,
+        error:
+          'Phase 7 Security Guardrail: lambdaHandler must be in "<module>.<export>" format (e.g., "index.handler") without path traversal.',
+      };
+    }
+  }
+
+  // 5. Validate containerPort
+  if (params.containerPort !== undefined && params.containerPort !== null) {
+    const port = Number(params.containerPort);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      return {
+        valid: false,
+        error: 'containerPort must be an integer between 1 and 65535.',
+      };
+    }
+  }
+
+  return { valid: true };
+}
+

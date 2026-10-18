@@ -106,9 +106,15 @@ export interface DeploymentRecord {
     ecrRepositoryUri?: string;
     ecsClusterName?: string;
     ecsServiceName?: string;
+    ecsTaskDefinitionArn?: string;
+    albTargetGroupArn?: string;
+    albListenerRuleArn?: string;
     lambdaFunctionName?: string;
+    lambdaRoleArn?: string;
+    apiGatewayId?: string;
     apiGatewayEndpoint?: string;
     amplifyAppId?: string;
+    amplifyBranchName?: string;
   };
   auditLogs: AuditLogEntry[];
   error?: {
@@ -285,3 +291,38 @@ export async function deleteDeploymentInfrastructure(
   }
   return data;
 }
+
+export interface SecurityGuardrailsStatus {
+  isolation: {
+    awsCredentialsStripped: boolean;
+    npmIgnoreScriptsEnforced: boolean;
+    nonRootContainersEnforced: boolean;
+    symlinkEscapeProtection: boolean;
+    commandInjectionFilter: boolean;
+    pathTraversalFilter: boolean;
+  };
+  quotas: {
+    maxBuildDurationSec: number;
+    maxArchiveSizeMb: number;
+    maxExtractedFiles: number;
+    maxConcurrentBuilds: number;
+    activeConcurrentBuilds: number;
+    maxActiveLiveDeployments: number;
+    activeLiveDeployments: number;
+    deploymentTtlHours: number;
+    rateLimitPerMinute: number;
+  };
+}
+
+/**
+ * GET /api/security/status
+ * Phase 7: Fetches active build isolation flags and AWS cost/resource quotas.
+ */
+export async function fetchSecurityStatus(): Promise<SecurityGuardrailsStatus> {
+  const res = await fetch(`${API_BASE}/security/status`);
+  if (!res.ok) {
+    throw new Error('Failed to fetch Phase 7 security guardrails status');
+  }
+  return res.json();
+}
+

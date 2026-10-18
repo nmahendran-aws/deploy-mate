@@ -14,12 +14,14 @@ import {
   mapDeploymentTypeToTarget,
   resolveServerControlledDomain,
   sanitizeUserEnvVars,
+  validateBuildOverrides,
   validateGitHubRepoUrl,
   validateSubdomain,
 } from '../utils/validation';
 import { sharedDomainManager } from './domainManager';
 import { isolatedBuildRunner } from './isolatedBuilder';
 import { repositoryAnalyzer } from './repositoryAnalyzer';
+import { securityGuardrails } from './securityGuardrails';
 
 export class DeploymentManager {
   private readonly store: DeploymentStore;
@@ -41,11 +43,12 @@ export class DeploymentManager {
   }
 
   /**
-   * Phase 1, Phase 2 & Phase 3:
+   * Phase 1–7:
    * - Validates GitHub URL
+   * - Enforces Phase 7 command injection, path traversal, and env var guardrails
+   * - Enforces Phase 7 concurrent build quota and AWS active deployment cost cap
    * - Validates optional subdomain & server-controlled Route 53 domain
    * - Atomically reserves the hostname in database before deployment starts
-   * - Applies Phase 3 target selection & dynamic target-specific configuration overrides
    * - Executes isolated build -> ACM us-east-1 cert -> Target Deployer -> Route 53 Alias -> HTTPS verification
    */
   public async startDeployment(req: CreateDeploymentRequest): Promise<{
@@ -64,18 +67,23 @@ export class DeploymentManager {
       };
     }
 
-    const target = mapDeploymentTypeToTarget(req.deploymentType, req.target, 'S3_CLOUDFRONT');
-    if (
-      target !== 'S3_CLOUDFRONT' &&
-      target !== 'ECS_FARGATE' &&
-      target !== 'LAMBDA_API_GATEWAY'
-    ) {
+    // Phase 7 Task 1: Validate build overrides against command injection & path traversal
+    const overridesCheck = validateBuildOverrides({
+      buildCommandOverride: req.buildCommandOverride,
+      outputDirOverride: req.outputDirOverride,
+      healthCheckPath: req.healthCheckPath,
+      lambdaHandler: req.lambdaHandler,
+      containerPort: req.containerPort,
+    });
+    if (!overridesCheck.valid) {
       return {
         ok: false,
         statusCode: 400,
-        error: `Target "${target}" was selected in the Phase 3 recommendation engine; its live AWS provisioner will be unlocked in Phase 6 (AWS Amplify Hosting). Currently active provisioners: S3_CLOUDFRONT, ECS_FARGATE, LAMBDA_API_GATEWAY.`,
+        error: overridesCheck.error,
       };
     }
+
+    const target = mapDeploymentTypeToTarget(req.deploymentType, req.target, 'S3_CLOUDFRONT');
 
     // Phase 2 Task 2: Validate the requested subdomain against strict hostname format
     const subdomainCheck = validateSubdomain(req.subdomain);
@@ -113,6 +121,16 @@ export class DeploymentManager {
       };
     }
 
+    // Phase 7 Task 3: Enforce concurrent build quota and AWS active deployment cost cap
+    const quotaCheck = securityGuardrails.checkDeploymentQuotas(this.store);
+    if (!quotaCheck.allowed) {
+      return {
+        ok: false,
+        statusCode: quotaCheck.statusCode || 429,
+        error: quotaCheck.error,
+      };
+    }
+
     // Phase 2 Task 3: Reserve hostname in database BEFORE deployment starts, preventing duplicates
     const deploymentId = `dep_${crypto.randomBytes(4).toString('hex')}`;
     if (customHostname) {
@@ -136,7 +154,7 @@ export class DeploymentManager {
         : target === 'LAMBDA_API_GATEWAY'
         ? 'serverless'
         : target === 'AMPLIFY'
-        ? 'fullstack'
+        ? 'amplify'
         : 'static');
 
     const record: DeploymentRecord = {

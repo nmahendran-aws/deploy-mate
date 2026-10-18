@@ -1,6 +1,7 @@
 import { Request, Response, Router } from 'express';
 import { deploymentManager } from '../services/deploymentManager';
 import { repositoryAnalyzer } from '../services/repositoryAnalyzer';
+import { securityGuardrails } from '../services/securityGuardrails';
 import { deploymentStore } from '../store/deploymentStore';
 import {
   getConfiguredDomains,
@@ -12,12 +13,24 @@ import {
 export const deployRouter = Router();
 
 /**
+ * GET /api/security/status
+ * Phase 7: Returns active build isolation flags, command/path guardrail status,
+ * concurrent build usage, and AWS active deployment cost caps.
+ */
+deployRouter.get('/security/status', (_req: Request, res: Response) => {
+  return res.json(securityGuardrails.getStatus(deploymentStore));
+});
+
+/**
  * POST /api/analyze
  * Phase 3: Pre-deployment repository inspection & multi-target recommendation engine.
- * Inspects a GitHub repository (package.json, Dockerfile, serverless.yml, next.config.*, etc.)
- * and returns the recommended AWS target, confidence score, detected signals, and suggested form fields.
  */
 deployRouter.post('/analyze', async (req: Request, res: Response) => {
+  const rateCheck = securityGuardrails.checkRateLimit(req.ip || 'analyze-client');
+  if (!rateCheck.allowed) {
+    return res.status(429).json({ error: rateCheck.error });
+  }
+
   const { repoUrl, branch } = req.body || {};
   const repoCheck = validateGitHubRepoUrl(repoUrl);
   if (!repoCheck.valid || !repoCheck.data) {
@@ -107,10 +120,14 @@ deployRouter.get('/domains', (req: Request, res: Response) => {
 
 /**
  * POST /api/deploy
- * Phase 1 & Phase 2 API Contract:
- * Accepts { repoUrl, deploymentType: "static", subdomain?: "demo", domain?: "yourdomain.com" }
+ * Phases 1–7 API Contract
  */
 deployRouter.post('/deploy', async (req: Request, res: Response) => {
+  const rateCheck = securityGuardrails.checkRateLimit(req.ip || 'deploy-client');
+  if (!rateCheck.allowed) {
+    return res.status(429).json({ error: rateCheck.error });
+  }
+
   const result = await deploymentManager.startDeployment(req.body || {});
   if (!result.ok || !result.deployment) {
     return res.status(result.statusCode).json({
@@ -161,8 +178,8 @@ deployRouter.get('/deployments', (_req: Request, res: Response) => {
 
 /**
  * DELETE /api/deploy/:id
- * Deletes the S3 bucket, CloudFront OAC, CloudFront distribution, and Route 53 Alias record,
- * and releases the reserved subdomain.
+ * Deletes all provisioned AWS resources across S3/CloudFront, ECS/ECR, Lambda/API GW, or Amplify,
+ * and releases the reserved Route 53 subdomain.
  */
 deployRouter.delete('/deploy/:id', async (req: Request, res: Response) => {
   const result = await deploymentManager.deleteDeployment(req.params.id);
