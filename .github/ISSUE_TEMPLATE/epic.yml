@@ -1,0 +1,38 @@
+name: "🏛️ Epic (Agile Initiative)"
+description: "Create a high-level Phase Epic grouping multiple Features and User Stories"
+title: "[DM-E#] Epic: "
+labels: ["type:epic"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template to define a Phase Epic and track its child User Stories (`- [ ] #issue`).
+  - type: input
+    id: phase
+    attributes:
+      label: "Roadmap Phase"
+      placeholder: "e.g., Phase 9 — Commercial AWS SaaS"
+    validations:
+      required: true
+  - type: textarea
+    id: business_goal
+    attributes:
+      label: "Business & Revenue Goal"
+      description: "Why does this Epic matter to DeployMate customers and MRR?"
+    validations:
+      required: true
+  - type: textarea
+    id: stories
+    attributes:
+      label: "Tracked User Stories"
+      description: "Link child User Story issue numbers using GitHub tasklist syntax"
+      value: |
+        - [ ] #
+  - type: textarea
+    id: exit_criteria
+    attributes:
+      label: "Epic Exit Criteria"
+      value: |
+        - [ ] All child User Stories merged and verified
+        - [ ] Automated unit, integration & security tests passing (`npm test`)
+        - [ ] Documentation & `.env.example` updated

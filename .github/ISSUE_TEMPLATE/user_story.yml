@@ -1,0 +1,67 @@
+name: "📋 User Story (Feature Deliverable)"
+description: "Create a Sprint User Story with Scope, Acceptance Criteria, and Test Cases"
+title: "[DM-###] "
+labels: ["type:story"]
+body:
+  - type: input
+    id: parent_epic
+    attributes:
+      label: "Parent Epic"
+      placeholder: "e.g., #16 (DM-E1)"
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: "Priority"
+      options:
+        - "P0 (Blocker)"
+        - "P1 (High)"
+        - "P2 (Medium)"
+    validations:
+      required: true
+  - type: dropdown
+    id: story_points
+    attributes:
+      label: "Story Points (Fibonacci)"
+      options:
+        - "1"
+        - "2"
+        - "3"
+        - "5"
+        - "8"
+        - "13"
+    validations:
+      required: true
+  - type: textarea
+    id: user_story
+    attributes:
+      label: "User Story"
+      value: "As a <persona>, I want <capability>, so that <business value>."
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: "Technical Scope & Code Touchpoints"
+      placeholder: "List backend/frontend files, API routes, and infrastructure modules affected."
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: "Acceptance Criteria (Given / When / Then)"
+      value: |
+        - [ ] **AC1:** *Given* ..., *When* ..., *Then* ...
+        - [ ] **AC2:** *Given* ..., *When* ..., *Then* ...
+    validations:
+      required: true
+  - type: textarea
+    id: test_cases
+    attributes:
+      label: "Verification Test Cases"
+      value: |
+        - [ ] `TC-###-01 (Unit):` ...
+        - [ ] `TC-###-02 (Integration / Security):` ...
+    validations:
+      required: true

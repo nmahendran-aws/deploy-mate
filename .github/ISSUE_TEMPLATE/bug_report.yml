@@ -1,0 +1,34 @@
+name: "🐛 Bug / Regression Report"
+description: "Report a build, deployment, security, or UI defect"
+title: "[BUG] "
+labels: ["bug"]
+body:
+  - type: input
+    id: related_story
+    attributes:
+      label: "Related Story / Test Case ID"
+      placeholder: "e.g., DM-901 / TC-901-02"
+  - type: dropdown
+    id: cloud_provider
+    attributes:
+      label: "Cloud Provider / Mode"
+      options:
+        - "AWS (Dry-Run)"
+        - "AWS (Live Account / BYOC)"
+        - "GCP"
+        - "Azure"
+        - "Control Plane / UI"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: "Steps to Reproduce & Observed Error"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: "Expected Behavior"
+    validations:
+      required: true
