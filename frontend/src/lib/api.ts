@@ -1,14 +1,42 @@
+export type CloudProvider = 'AWS' | 'GCP' | 'AZURE';
+
+export type WorkloadArchetype =
+  | 'STATIC_EDGE'
+  | 'SSR_WEB'
+  | 'CONTAINER_SERVICE'
+  | 'SERVERLESS_FUNC';
+
+export type ExecutionTenancy = 'DEPLOYMATE_MANAGED' | 'CUSTOMER_BYOC';
+
+export type EnvironmentType = 'production' | 'staging' | 'preview';
+
+export type PlanTier =
+  | 'CAMPUS_FREE'
+  | 'PRO_BUILDER'
+  | 'GROWTH_TEAM'
+  | 'SCALE_AGENCY'
+  | 'ENTERPRISE';
+
+export type OrgRole = 'OWNER' | 'ADMIN' | 'DEVELOPER' | 'VIEWER';
+
 export type DeploymentTarget =
   | 'S3_CLOUDFRONT'
   | 'ECS_FARGATE'
   | 'LAMBDA_API_GATEWAY'
-  | 'AMPLIFY';
+  | 'AMPLIFY'
+  | 'GCP_STORAGE_CDN'
+  | 'GCP_CLOUD_RUN'
+  | 'GCP_CLOUD_FUNCTIONS'
+  | 'AZURE_STATIC_FRONTDOOR'
+  | 'AZURE_CONTAINER_APPS'
+  | 'AZURE_FUNCTIONS';
 
 export type DeploymentTypeInput =
   | 'static'
   | 'container'
   | 'serverless'
   | 'amplify'
+  | 'ssr'
   | 'auto';
 
 export type DeploymentStatus =
@@ -22,6 +50,62 @@ export type DeploymentStatus =
   | 'FAILED'
   | 'DELETED';
 
+export interface UserRecord {
+  userId: string;
+  email: string;
+  displayName: string;
+  username: string;
+  avatarUrl?: string;
+  authProvider: 'github' | 'google' | 'email';
+  studentVerified: boolean;
+  academicDomain?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OrganizationRecord {
+  orgId: string;
+  name: string;
+  slug: string;
+  planTier: PlanTier;
+  ownerUserId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MembershipRecord {
+  membershipId: string;
+  orgId: string;
+  userId: string;
+  userEmail: string;
+  role: OrgRole;
+  createdAt: string;
+}
+
+export interface ProjectRecord {
+  projectId: string;
+  orgId: string;
+  name: string;
+  slug: string;
+  repoUrl: string;
+  defaultBranch: string;
+  defaultProvider: CloudProvider;
+  defaultArchetype: WorkloadArchetype;
+  defaultTenancy: ExecutionTenancy;
+  environments: EnvironmentType[];
+  createdAt: string;
+}
+
+export interface QueueSnapshot {
+  maxConcurrency: number;
+  maxQueueBacklog: number;
+  jobTimeoutMs: number;
+  activeWorkers: number;
+  queuedJobs: number;
+  activeDeploymentIds: string[];
+  queuedDeploymentIds: string[];
+}
+
 export interface SignalDetection {
   signal: string;
   description: string;
@@ -30,6 +114,8 @@ export interface SignalDetection {
 
 export interface TargetOptionAssessment {
   target: DeploymentTarget;
+  cloudProvider?: CloudProvider;
+  archetype?: WorkloadArchetype;
   title: string;
   subtitle: string;
   fitScore: number;
@@ -43,6 +129,7 @@ export interface AnalysisResult {
   buildCommand: string | null;
   outputDirectory: string | null;
   recommendedTarget: DeploymentTarget;
+  recommendedArchetype?: WorkloadArchetype;
   confidence: number;
   warnings: string[];
   reasons: string[];
@@ -67,6 +154,13 @@ export interface AuditLogEntry {
 
 export interface DeploymentRecord {
   deploymentId: string;
+  orgId?: string;
+  projectId?: string;
+  environment?: EnvironmentType;
+  createdByUserId?: string;
+  cloudProvider?: CloudProvider;
+  archetype?: WorkloadArchetype;
+  tenancy?: ExecutionTenancy;
   repoUrl: string;
   repoOwner: string;
   repoName: string;
@@ -74,6 +168,7 @@ export interface DeploymentRecord {
   deploymentType: DeploymentTypeInput;
   target: DeploymentTarget;
   status: DeploymentStatus;
+  queuePosition?: number | null;
   subdomain?: string;
   domain?: string;
   customHostname?: string;
@@ -96,6 +191,7 @@ export interface DeploymentRecord {
     httpsAndDomainVerified: boolean;
   };
   resources: {
+    provider?: CloudProvider;
     s3BucketName?: string;
     cloudFrontOacId?: string;
     cloudFrontDistributionId?: string;
@@ -129,8 +225,201 @@ export interface DeploymentRecord {
   completedAt?: string | null;
 }
 
-const API_BASE =
+export const API_BASE =
   process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
+
+const TOKEN_STORAGE_KEY = 'deploymate_session_token';
+const ORG_STORAGE_KEY = 'deploymate_active_org_id';
+
+export function getStoredSessionToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return window.localStorage.getItem(TOKEN_STORAGE_KEY);
+}
+
+export function setStoredSession(token: string | null, orgId?: string | null): void {
+  if (typeof window === 'undefined') return;
+  if (token) {
+    window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
+  } else {
+    window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+  }
+  if (orgId) {
+    window.localStorage.setItem(ORG_STORAGE_KEY, orgId);
+  } else if (token === null) {
+    window.localStorage.removeItem(ORG_STORAGE_KEY);
+  }
+}
+
+export function getStoredActiveOrgId(): string | null {
+  if (typeof window === 'undefined') return null;
+  return window.localStorage.getItem(ORG_STORAGE_KEY);
+}
+
+export function setStoredActiveOrgId(orgId: string): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(ORG_STORAGE_KEY, orgId);
+}
+
+function buildHeaders(includeJson = false): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (includeJson) {
+    headers['Content-Type'] = 'application/json';
+  }
+  const token = getStoredSessionToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  const orgId = getStoredActiveOrgId();
+  if (orgId) {
+    headers['X-Org-Id'] = orgId;
+  }
+  return headers;
+}
+
+/**
+ * POST /api/auth/session
+ * DM-904: OAuth / Email sign-in with automatic .edu student verification & Personal Workspace provisioning.
+ */
+export async function signInSession(params: {
+  email: string;
+  displayName?: string;
+  username?: string;
+  authProvider?: 'github' | 'google' | 'email';
+}): Promise<{
+  token: string;
+  user: UserRecord;
+  defaultOrganization: OrganizationRecord;
+  organizations: Array<{ organization: OrganizationRecord; role: OrgRole }>;
+}> {
+  const res = await fetch(`${API_BASE}/auth/session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(params),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Failed to sign in');
+  }
+  setStoredSession(data.token, data.defaultOrganization?.orgId);
+  return data;
+}
+
+/**
+ * GET /api/auth/me
+ */
+export async function fetchCurrentSession(): Promise<{
+  user: UserRecord;
+  activeOrgId: string;
+  activeRole: OrgRole | null;
+  organizations: Array<{ organization: OrganizationRecord; role: OrgRole }>;
+} | null> {
+  const token = getStoredSessionToken();
+  if (!token) return null;
+  const res = await fetch(`${API_BASE}/auth/me`, {
+    headers: buildHeaders(),
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    setStoredSession(null);
+    return null;
+  }
+  return res.json();
+}
+
+/**
+ * POST /api/auth/logout
+ */
+export async function signOutSession(): Promise<void> {
+  setStoredSession(null);
+  try {
+    await fetch(`${API_BASE}/auth/logout`, {
+      method: 'POST',
+      credentials: 'include',
+    });
+  } catch {
+    // Ignore network error during logout
+  }
+}
+
+/**
+ * POST /api/orgs
+ * DM-905: Creates a new Team Organization with OWNER role.
+ */
+export async function createTeamOrganization(params: {
+  name: string;
+  slug?: string;
+  planTier?: PlanTier;
+}): Promise<{
+  organization: OrganizationRecord;
+  membership: MembershipRecord;
+}> {
+  const res = await fetch(`${API_BASE}/orgs`, {
+    method: 'POST',
+    headers: buildHeaders(true),
+    credentials: 'include',
+    body: JSON.stringify(params),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Failed to create organization');
+  }
+  return data;
+}
+
+/**
+ * GET /api/orgs/:orgId/members
+ */
+export async function listOrganizationMembers(orgId: string): Promise<{
+  members: MembershipRecord[];
+}> {
+  const res = await fetch(`${API_BASE}/orgs/${encodeURIComponent(orgId)}/members`, {
+    headers: buildHeaders(),
+    credentials: 'include',
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Failed to list members');
+  }
+  return data;
+}
+
+/**
+ * POST /api/orgs/:orgId/members
+ */
+export async function inviteOrganizationMember(
+  orgId: string,
+  params: { email: string; role: OrgRole; displayName?: string }
+): Promise<{
+  membership: MembershipRecord;
+  user: UserRecord;
+}> {
+  const res = await fetch(`${API_BASE}/orgs/${encodeURIComponent(orgId)}/members`, {
+    method: 'POST',
+    headers: buildHeaders(true),
+    credentials: 'include',
+    body: JSON.stringify(params),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Failed to invite member');
+  }
+  return data;
+}
+
+/**
+ * GET /api/queue/status
+ * DM-903: Fetches live worker queue concurrency and backlog metrics.
+ */
+export async function fetchQueueStatus(): Promise<QueueSnapshot> {
+  const res = await fetch(`${API_BASE}/queue/status`, {
+    headers: buildHeaders(),
+  });
+  if (!res.ok) {
+    throw new Error('Failed to fetch worker queue status');
+  }
+  return res.json();
+}
 
 /**
  * POST /api/analyze
@@ -148,7 +437,7 @@ export async function analyzeRepository(
 }> {
   const res = await fetch(`${API_BASE}/analyze`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: buildHeaders(true),
     body: JSON.stringify({ repoUrl, branch }),
   });
   const data = await res.json();
@@ -179,7 +468,9 @@ export async function fetchDomainsAndCheckSubdomain(
   if (domain) params.set('domain', domain);
   const query = params.toString() ? `?${params.toString()}` : '';
 
-  const res = await fetch(`${API_BASE}/domains${query}`);
+  const res = await fetch(`${API_BASE}/domains${query}`, {
+    headers: buildHeaders(),
+  });
   if (!res.ok) {
     throw new Error('Failed to load server-controlled domains');
   }
@@ -188,10 +479,15 @@ export async function fetchDomainsAndCheckSubdomain(
 
 /**
  * POST /api/deploy
- * Phase 1, Phase 2 & Phase 3 API Contract:
+ * Phases 1–9 API Contract: Multi-cloud, multi-tenant, RBAC-protected deployment.
  */
 export async function createStaticDeployment(payload: {
   repoUrl: string;
+  cloudProvider?: CloudProvider;
+  archetype?: WorkloadArchetype;
+  tenancy?: ExecutionTenancy;
+  environment?: EnvironmentType;
+  projectId?: string;
   target?: DeploymentTarget;
   deploymentType?: DeploymentTypeInput;
   branch?: string;
@@ -207,6 +503,10 @@ export async function createStaticDeployment(payload: {
 }): Promise<{
   deploymentId: string;
   status: DeploymentStatus;
+  queuePosition?: number | null;
+  cloudProvider: CloudProvider;
+  archetype: WorkloadArchetype;
+  tenancy: ExecutionTenancy;
   target: DeploymentTarget;
   url: string | null;
   customHostname: string | null;
@@ -214,10 +514,16 @@ export async function createStaticDeployment(payload: {
 }> {
   const res = await fetch(`${API_BASE}/deploy`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: buildHeaders(true),
+    credentials: 'include',
     body: JSON.stringify({
       repoUrl: payload.repoUrl,
-      target: payload.target || 'S3_CLOUDFRONT',
+      cloudProvider: payload.cloudProvider || 'AWS',
+      archetype: payload.archetype,
+      tenancy: payload.tenancy || 'DEPLOYMATE_MANAGED',
+      environment: payload.environment || 'production',
+      projectId: payload.projectId,
+      target: payload.cloudProvider && payload.cloudProvider !== 'AWS' ? undefined : payload.target || 'S3_CLOUDFRONT',
       deploymentType: payload.deploymentType || 'static',
       branch: payload.branch,
       subdomain: payload.subdomain,
@@ -234,7 +540,8 @@ export async function createStaticDeployment(payload: {
 
   const data = await res.json();
   if (!res.ok) {
-    throw new Error(data.error || 'Failed to start deployment');
+    const detail = data.remediation ? ` — ${data.remediation}` : '';
+    throw new Error(`${data.error || 'Failed to start deployment'}${detail}`);
   }
   return data;
 }
@@ -250,7 +557,10 @@ export async function getDeploymentStatus(deploymentId: string): Promise<{
   customHostname: string | null;
   deployment: DeploymentRecord;
 }> {
-  const res = await fetch(`${API_BASE}/deploy/${encodeURIComponent(deploymentId)}`);
+  const res = await fetch(`${API_BASE}/deploy/${encodeURIComponent(deploymentId)}`, {
+    headers: buildHeaders(),
+    credentials: 'include',
+  });
   const data = await res.json();
   if (!res.ok) {
     throw new Error(data.error || 'Failed to fetch deployment status');
@@ -264,7 +574,10 @@ export async function getDeploymentStatus(deploymentId: string): Promise<{
 export async function listDeployments(): Promise<{
   deployments: DeploymentRecord[];
 }> {
-  const res = await fetch(`${API_BASE}/deployments`);
+  const res = await fetch(`${API_BASE}/deployments`, {
+    headers: buildHeaders(),
+    credentials: 'include',
+  });
   const data = await res.json();
   if (!res.ok) {
     throw new Error(data.error || 'Failed to fetch deployments');
@@ -284,6 +597,8 @@ export async function deleteDeploymentInfrastructure(
 }> {
   const res = await fetch(`${API_BASE}/deploy/${encodeURIComponent(deploymentId)}`, {
     method: 'DELETE',
+    headers: buildHeaders(),
+    credentials: 'include',
   });
   const data = await res.json();
   if (!res.ok) {
@@ -316,10 +631,11 @@ export interface SecurityGuardrailsStatus {
 
 /**
  * GET /api/security/status
- * Phase 7: Fetches active build isolation flags and AWS cost/resource quotas.
  */
 export async function fetchSecurityStatus(): Promise<SecurityGuardrailsStatus> {
-  const res = await fetch(`${API_BASE}/security/status`);
+  const res = await fetch(`${API_BASE}/security/status`, {
+    headers: buildHeaders(),
+  });
   if (!res.ok) {
     throw new Error('Failed to fetch Phase 7 security guardrails status');
   }
@@ -348,10 +664,11 @@ export interface ObservabilityMetrics {
 
 /**
  * GET /api/observability/metrics
- * Phase 8: Fetches real-time platform observability metrics and AWS resource counts.
  */
 export async function fetchObservabilityMetrics(): Promise<ObservabilityMetrics> {
-  const res = await fetch(`${API_BASE}/observability/metrics`);
+  const res = await fetch(`${API_BASE}/observability/metrics`, {
+    headers: buildHeaders(),
+  });
   if (!res.ok) {
     throw new Error('Failed to fetch Phase 8 observability metrics');
   }
@@ -360,7 +677,6 @@ export async function fetchObservabilityMetrics(): Promise<ObservabilityMetrics>
 
 /**
  * POST /api/deploy/:id/retry
- * Phase 8: Triggers a 1-click self-healing retry for a FAILED deployment.
  */
 export async function retryFailedDeployment(deploymentId: string): Promise<{
   deploymentId: string;
@@ -369,7 +685,11 @@ export async function retryFailedDeployment(deploymentId: string): Promise<{
 }> {
   const res = await fetch(
     `${API_BASE}/deploy/${encodeURIComponent(deploymentId)}/retry`,
-    { method: 'POST' }
+    {
+      method: 'POST',
+      headers: buildHeaders(),
+      credentials: 'include',
+    }
   );
   const data = await res.json();
   if (!res.ok) {
@@ -377,5 +697,3 @@ export async function retryFailedDeployment(deploymentId: string): Promise<{
   }
   return data;
 }
-
-

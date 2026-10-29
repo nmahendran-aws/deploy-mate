@@ -1,14 +1,47 @@
-export type DeploymentTarget =
+import { EnvironmentType } from './tenant';
+
+/**
+ * DM-901 (#1): Cloud-agnostic provider, workload archetype, and execution tenancy models.
+ */
+export type CloudProvider = 'AWS' | 'GCP' | 'AZURE';
+
+export type WorkloadArchetype =
+  | 'STATIC_EDGE'
+  | 'SSR_WEB'
+  | 'CONTAINER_SERVICE'
+  | 'SERVERLESS_FUNC';
+
+export type ExecutionTenancy =
+  | 'DEPLOYMATE_MANAGED'
+  | 'CUSTOMER_BYOC';
+
+export type AwsDeploymentTarget =
   | 'S3_CLOUDFRONT'
   | 'ECS_FARGATE'
   | 'LAMBDA_API_GATEWAY'
   | 'AMPLIFY';
+
+export type GcpDeploymentTarget =
+  | 'GCP_STORAGE_CDN'
+  | 'GCP_CLOUD_RUN'
+  | 'GCP_CLOUD_FUNCTIONS';
+
+export type AzureDeploymentTarget =
+  | 'AZURE_STATIC_FRONTDOOR'
+  | 'AZURE_CONTAINER_APPS'
+  | 'AZURE_FUNCTIONS';
+
+export type DeploymentTarget =
+  | AwsDeploymentTarget
+  | GcpDeploymentTarget
+  | AzureDeploymentTarget;
 
 export type DeploymentTypeInput =
   | 'static'
   | 'container'
   | 'serverless'
   | 'amplify'
+  | 'ssr'
   | 'auto';
 
 export type DeploymentStatus =
@@ -40,6 +73,8 @@ export interface SignalDetection {
 
 export interface TargetOptionAssessment {
   target: DeploymentTarget;
+  cloudProvider?: CloudProvider;
+  archetype?: WorkloadArchetype;
   title: string;
   subtitle: string;
   fitScore: number;
@@ -53,6 +88,7 @@ export interface AnalysisResult {
   buildCommand: string | null;
   outputDirectory: string | null;
   recommendedTarget: DeploymentTarget;
+  recommendedArchetype?: WorkloadArchetype;
   confidence: number;
   warnings: string[];
   reasons: string[];
@@ -99,6 +135,36 @@ export interface TrackedAwsResources {
   route53TargetHostedZoneId?: string;
 }
 
+export interface TrackedGcpResources {
+  gcsBucketName?: string;
+  cloudCdnBackendName?: string;
+  artifactRegistryImage?: string;
+  cloudRunServiceName?: string;
+  cloudRunRegion?: string;
+  cloudFunctionName?: string;
+  cloudDnsManagedZone?: string;
+}
+
+export interface TrackedAzureResources {
+  resourceGroupName?: string;
+  storageAccountName?: string;
+  frontDoorEndpointName?: string;
+  acrImageUri?: string;
+  containerAppName?: string;
+  functionAppName?: string;
+  azureDnsZoneName?: string;
+}
+
+/**
+ * Polymorphic cloud resource tracking manifest preserving 100% compatibility
+ * with top-level AWS keys while supporting GCP (Phase 10) and Azure (Phase 11).
+ */
+export interface TrackedCloudResources extends TrackedAwsResources {
+  provider?: CloudProvider;
+  gcp?: TrackedGcpResources;
+  azure?: TrackedAzureResources;
+}
+
 export interface AuditLogEntry {
   timestamp: string;
   phase: DeploymentStatus;
@@ -115,6 +181,15 @@ export interface DeploymentChecklist {
 
 export interface DeploymentRecord {
   deploymentId: string;
+  /** Multi-tenant ownership fields (DM-902 / DM-905) */
+  orgId?: string;
+  projectId?: string;
+  environment?: EnvironmentType;
+  createdByUserId?: string;
+  /** Cloud-agnostic orchestration fields (DM-901) */
+  cloudProvider: CloudProvider;
+  archetype: WorkloadArchetype;
+  tenancy: ExecutionTenancy;
   repoUrl: string;
   repoOwner: string;
   repoName: string;
@@ -122,6 +197,7 @@ export interface DeploymentRecord {
   deploymentType: DeploymentTypeInput;
   target: DeploymentTarget;
   status: DeploymentStatus;
+  queuePosition?: number | null;
   subdomain?: string;
   domain?: string;
   customHostname?: string;
@@ -135,7 +211,7 @@ export interface DeploymentRecord {
   infrastructureUrl?: string | null;
   analysis?: AnalysisResult;
   checklist: DeploymentChecklist;
-  resources: TrackedAwsResources;
+  resources: TrackedCloudResources;
   auditLogs: AuditLogEntry[];
   error?: {
     code: string;
@@ -161,6 +237,13 @@ export interface DeploymentRecord {
 
 export interface CreateDeploymentRequest {
   repoUrl: string;
+  cloudProvider?: CloudProvider;
+  archetype?: WorkloadArchetype;
+  tenancy?: ExecutionTenancy;
+  orgId?: string;
+  projectId?: string;
+  environment?: EnvironmentType;
+  createdByUserId?: string;
   deploymentType?: DeploymentTypeInput;
   target?: DeploymentTarget;
   subdomain?: string;

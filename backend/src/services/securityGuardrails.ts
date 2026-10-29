@@ -100,11 +100,14 @@ export class SecurityGuardrails {
         d.status === 'VERIFYING'
     ).length;
 
-    if (activeBuilds >= this.maxConcurrentBuilds) {
+    const queuedBuilds = all.filter((d) => d.status === 'QUEUED').length;
+    const maxQueueBacklog = Number(process.env.MAX_DEPLOYMENT_QUEUE_BACKLOG || 100);
+
+    if (queuedBuilds >= maxQueueBacklog) {
       return {
         allowed: false,
         statusCode: 429,
-        error: `Phase 7 Resource Quota: Maximum of ${this.maxConcurrentBuilds} concurrent deployments are already in progress (${activeBuilds}/${this.maxConcurrentBuilds}). Please wait for an active build to finish.`,
+        error: `Phase 9 Worker Queue Guardrail: Maximum queue backlog of ${maxQueueBacklog} waiting deployments reached. Please retry shortly.`,
       };
     }
 

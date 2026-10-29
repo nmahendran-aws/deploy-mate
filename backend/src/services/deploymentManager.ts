@@ -1,14 +1,23 @@
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 import path from 'path';
-import { getDeployerForTarget } from '../deployers';
+import {
+  inferArchetypeFromTarget,
+  inferProviderFromTarget,
+  mapProviderAndArchetypeToTarget,
+  resolveDeployer,
+} from '../deployers';
+import { CloudProviderNotAvailableError } from '../deployers/baseDeployer';
 import { DeploymentStore, deploymentStore } from '../store/deploymentStore';
 import {
+  CloudProvider,
   ConfiguredDomain,
   CreateDeploymentRequest,
   DeploymentRecord,
   DeploymentStatus,
   DeploymentTarget,
+  ExecutionTenancy,
+  WorkloadArchetype,
 } from '../types/deployment';
 import {
   mapDeploymentTypeToTarget,
@@ -18,17 +27,33 @@ import {
   validateGitHubRepoUrl,
   validateSubdomain,
 } from '../utils/validation';
+import { DeploymentJobQueue, deploymentJobQueue } from './deploymentJobQueue';
 import { sharedDomainManager } from './domainManager';
 import { isolatedBuildRunner } from './isolatedBuilder';
 import { repositoryAnalyzer } from './repositoryAnalyzer';
 import { securityGuardrails } from './securityGuardrails';
 import { selfHealingEngine } from './selfHealingEngine';
 
+export interface StartDeploymentResponse {
+  ok: boolean;
+  statusCode: number;
+  deployment?: DeploymentRecord;
+  error?: string;
+  code?: string;
+  remediation?: string;
+  plannedTarget?: DeploymentTarget;
+}
+
 export class DeploymentManager {
   private readonly store: DeploymentStore;
+  private readonly queue: DeploymentJobQueue;
 
-  constructor(store: DeploymentStore = deploymentStore) {
+  constructor(
+    store: DeploymentStore = deploymentStore,
+    queue: DeploymentJobQueue = deploymentJobQueue
+  ) {
     this.store = store;
+    this.queue = queue;
   }
 
   public isDryRunMode(): boolean {
@@ -44,20 +69,15 @@ export class DeploymentManager {
   }
 
   /**
-   * Phase 1–7:
-   * - Validates GitHub URL
-   * - Enforces Phase 7 command injection, path traversal, and env var guardrails
-   * - Enforces Phase 7 concurrent build quota and AWS active deployment cost cap
-   * - Validates optional subdomain & server-controlled Route 53 domain
-   * - Atomically reserves the hostname in database before deployment starts
-   * - Executes isolated build -> ACM us-east-1 cert -> Target Deployer -> Route 53 Alias -> HTTPS verification
+   * Phases 1–9:
+   * - Validates GitHub URL, command/path guardrails, subdomain & domain
+   * - Resolves (CloudProvider, WorkloadArchetype, ExecutionTenancy) via multi-cloud registry (DM-901)
+   * - Atomically reserves hostname before deployment starts (DM-902)
+   * - Enqueues job in durable bounded asynchronous worker queue with timeout watchdog (DM-903)
    */
-  public async startDeployment(req: CreateDeploymentRequest): Promise<{
-    ok: boolean;
-    statusCode: number;
-    deployment?: DeploymentRecord;
-    error?: string;
-  }> {
+  public async startDeployment(
+    req: CreateDeploymentRequest
+  ): Promise<StartDeploymentResponse> {
     // Phase 1 Task 2: Validate the submitted GitHub URL
     const repoCheck = validateGitHubRepoUrl(req.repoUrl);
     if (!repoCheck.valid || !repoCheck.data) {
@@ -84,7 +104,48 @@ export class DeploymentManager {
       };
     }
 
-    const target = mapDeploymentTypeToTarget(req.deploymentType, req.target, 'S3_CLOUDFRONT');
+    // DM-901: Resolve CloudProvider, WorkloadArchetype, ExecutionTenancy & DeploymentTarget
+    const cloudProvider: CloudProvider =
+      req.cloudProvider || inferProviderFromTarget(req.target);
+
+    const baseAwsTarget = mapDeploymentTypeToTarget(
+      req.deploymentType,
+      req.target,
+      'S3_CLOUDFRONT'
+    );
+
+    const archetype: WorkloadArchetype =
+      req.archetype || inferArchetypeFromTarget(req.target || baseAwsTarget, req.deploymentType);
+
+    const target: DeploymentTarget =
+      req.target && inferProviderFromTarget(req.target) === cloudProvider
+        ? req.target
+        : cloudProvider === 'AWS'
+        ? baseAwsTarget
+        : mapProviderAndArchetypeToTarget(cloudProvider, archetype);
+
+    const tenancy: ExecutionTenancy = req.tenancy || 'DEPLOYMATE_MANAGED';
+
+    // Validate provider/target availability in multi-cloud registry BEFORE reserving hostnames (DM-901 AC2)
+    try {
+      resolveDeployer(cloudProvider, target);
+    } catch (err: unknown) {
+      if (err instanceof CloudProviderNotAvailableError) {
+        return {
+          ok: false,
+          statusCode: err.statusCode,
+          code: err.code,
+          error: err.message,
+          remediation: err.remediation,
+          plannedTarget: err.plannedTarget,
+        };
+      }
+      return {
+        ok: false,
+        statusCode: 400,
+        error: err instanceof Error ? err.message : 'Unsupported deployment target.',
+      };
+    }
 
     // Phase 2 Task 2: Validate the requested subdomain against strict hostname format
     const subdomainCheck = validateSubdomain(req.subdomain);
@@ -122,17 +183,19 @@ export class DeploymentManager {
       };
     }
 
-    // Phase 7 Task 3: Enforce concurrent build quota and AWS active deployment cost cap
+    // Phase 7 & 9: Enforce queue backlog and active live deployment cost cap
     const quotaCheck = securityGuardrails.checkDeploymentQuotas(this.store);
-    if (!quotaCheck.allowed) {
+    if (!quotaCheck.allowed || !this.queue.canAcceptMore()) {
       return {
         ok: false,
         statusCode: quotaCheck.statusCode || 429,
-        error: quotaCheck.error,
+        error:
+          quotaCheck.error ||
+          'Deployment worker queue is currently at maximum capacity. Please retry shortly.',
       };
     }
 
-    // Phase 2 Task 3: Reserve hostname in database BEFORE deployment starts, preventing duplicates
+    // Phase 2 Task 3 & DM-902: Reserve hostname atomically BEFORE deployment starts
     const deploymentId = `dep_${crypto.randomBytes(4).toString('hex')}`;
     if (customHostname) {
       const reservation = this.store.reserveHostname(customHostname, deploymentId);
@@ -150,23 +213,39 @@ export class DeploymentManager {
 
     const resolvedDeploymentType =
       req.deploymentType ||
-      (target === 'ECS_FARGATE'
+      (archetype === 'CONTAINER_SERVICE'
         ? 'container'
-        : target === 'LAMBDA_API_GATEWAY'
+        : archetype === 'SERVERLESS_FUNC'
         ? 'serverless'
-        : target === 'AMPLIFY'
+        : archetype === 'SSR_WEB'
         ? 'amplify'
         : 'static');
 
+    const snapshotBeforeEnqueue = this.queue.getSnapshot();
+    const willQueueWait =
+      snapshotBeforeEnqueue.activeWorkers >= snapshotBeforeEnqueue.maxConcurrency;
+    const initialStatus: DeploymentStatus = willQueueWait ? 'QUEUED' : 'BUILDING';
+    const initialQueuePosition = willQueueWait
+      ? snapshotBeforeEnqueue.queuedJobs + 1
+      : null;
+
     const record: DeploymentRecord = {
       deploymentId,
+      orgId: req.orgId,
+      projectId: req.projectId,
+      environment: req.environment || 'production',
+      createdByUserId: req.createdByUserId,
+      cloudProvider,
+      archetype,
+      tenancy,
       repoUrl: repoCheck.data.normalizedUrl,
       repoOwner: repoCheck.data.owner,
       repoName: repoCheck.data.repo,
       branch: req.branch || repoCheck.data.branch || 'main',
       deploymentType: resolvedDeploymentType,
       target,
-      status: 'BUILDING',
+      status: initialStatus,
+      queuePosition: initialQueuePosition,
       subdomain: subdomainCheck.subdomain,
       domain: domainConfig?.domain,
       customHostname,
@@ -187,15 +266,19 @@ export class DeploymentManager {
         cloudResourcesConfigured: false,
         httpsAndDomainVerified: false,
       },
-      resources: {},
+      resources: {
+        provider: cloudProvider,
+      },
       auditLogs: [
         {
           timestamp: now,
-          phase: 'BUILDING',
+          phase: initialStatus,
           level: 'INFO',
-          message: `Deployment ${deploymentId} started for ${repoCheck.data.normalizedUrl} [target=${target}]${
-            customHostname ? ` with reserved hostname https://${customHostname}` : ''
-          }.`,
+          message: willQueueWait
+            ? `Deployment ${deploymentId} queued at position #${initialQueuePosition} for ${repoCheck.data.normalizedUrl} [provider=${cloudProvider}, target=${target}].`
+            : `Deployment ${deploymentId} started for ${repoCheck.data.normalizedUrl} [provider=${cloudProvider}, target=${target}]${
+                customHostname ? ` with reserved hostname https://${customHostname}` : ''
+              }.`,
         },
       ],
       error: null,
@@ -208,13 +291,86 @@ export class DeploymentManager {
 
     this.store.create(record);
 
-    void this.executePipeline(deploymentId, repoCheck.data.cloneUrl, domainConfig, envCheck.sanitized);
+    this.enqueuePipelineExecution(
+      deploymentId,
+      repoCheck.data.cloneUrl,
+      domainConfig,
+      envCheck.sanitized
+    );
 
     return {
       ok: true,
       statusCode: 202,
-      deployment: record,
+      deployment: this.store.get(deploymentId) || record,
     };
+  }
+
+  private enqueuePipelineExecution(
+    deploymentId: string,
+    cloneUrl: string,
+    domainConfig?: ConfiguredDomain,
+    userEnvVars?: Record<string, string>
+  ): void {
+    this.queue.enqueue({
+      payload: {
+        deploymentId,
+        cloneUrl,
+        domainConfig,
+        userEnvVars,
+      },
+      onStartBuilding: (id) => {
+        const cur = this.store.get(id);
+        if (cur && cur.status === 'QUEUED') {
+          this.store.update(id, { status: 'BUILDING', queuePosition: null });
+          this.store.addLog(
+            id,
+            'BUILDING',
+            'INFO',
+            `Worker slot acquired — transitioning ${id} from QUEUED to BUILDING.`
+          );
+        } else if (cur) {
+          this.store.update(id, { queuePosition: null });
+        }
+      },
+      onQueuePositionChanged: (id, pos) => {
+        const cur = this.store.get(id);
+        if (cur && cur.status === 'QUEUED') {
+          this.store.update(id, { queuePosition: pos });
+        }
+      },
+      onTimeout: (payload, timeoutMs) => {
+        const cur = this.store.get(payload.deploymentId);
+        if (!cur || cur.status === 'LIVE' || cur.status === 'DELETED') return;
+        const wsPath = path.join(
+          process.env.ISOLATED_BUILD_ROOT ||
+            path.join(require('os').tmpdir(), 'repo2cloud-isolated-builds'),
+          payload.deploymentId
+        );
+        isolatedBuildRunner.cleanupWorkspace(wsPath);
+        const message = `Worker execution exceeded maximum duration (${timeoutMs}ms) and was terminated safely.`;
+        this.store.addLog(payload.deploymentId, cur.status, 'ERROR', message);
+        this.store.update(payload.deploymentId, {
+          status: 'FAILED',
+          queuePosition: null,
+          url: null,
+          error: {
+            code: 'BUILD_TIMEOUT',
+            message,
+            phase: cur.status,
+            remediation:
+              'Optimize dependency installation / build scripts or upgrade workspace plan for extended build timeouts.',
+          },
+        });
+      },
+      processor: async (payload) => {
+        await this.executePipeline(
+          payload.deploymentId,
+          payload.cloneUrl,
+          payload.domainConfig,
+          payload.userEnvVars
+        );
+      },
+    });
   }
 
   private async executePipeline(
@@ -226,7 +382,13 @@ export class DeploymentManager {
     let workspaceDir: string | undefined;
     let currentPhase: DeploymentStatus = 'BUILDING';
 
+    const isAbortedOrTimedOut = (): boolean => {
+      const latest = this.store.get(deploymentId);
+      return !latest || latest.status === 'FAILED' || latest.status === 'DELETED';
+    };
+
     const setStatus = (status: DeploymentStatus, message?: string) => {
+      if (isAbortedOrTimedOut()) return;
       currentPhase = status;
       this.store.update(deploymentId, { status });
       if (message) {
@@ -240,9 +402,8 @@ export class DeploymentManager {
 
     try {
       const record = this.store.get(deploymentId);
-      if (!record) return;
+      if (!record || record.status === 'FAILED' || record.status === 'DELETED') return;
 
-      // Phase 1 Tasks 2 & 3: Inspect package.json and identify buildCommand & outputDirectory
       this.store.addLog(
         deploymentId,
         'BUILDING',
@@ -259,6 +420,8 @@ export class DeploymentManager {
       );
       workspaceDir = prep.workspaceDir;
 
+      if (isAbortedOrTimedOut()) return;
+
       const analysis = prep.clonedFromRemote
         ? repositoryAnalyzer.analyzeDirectory(prep.repoDir)
         : await repositoryAnalyzer.analyzeRemoteGitHubRepo(
@@ -267,7 +430,6 @@ export class DeploymentManager {
             record.branch
           );
 
-      // Apply Phase 3 dynamic form overrides if supplied by the user
       if (record.targetConfig?.buildCommand) {
         analysis.buildCommand = record.targetConfig.buildCommand;
       }
@@ -285,18 +447,23 @@ export class DeploymentManager {
         }", outputDirectory="${analysis.outputDirectory || './'}").`
       );
 
-      const deployer = getDeployerForTarget(record.target);
+      const deployer = resolveDeployer(record.cloudProvider, record.target);
       const compatibility = deployer.validateCompatibility(analysis);
       if (!compatibility.compatible) {
-        const err = new Error(compatibility.reason || 'Repository is not compatible with selected target.');
-        (err as Error & { code?: string; remediation?: string }).code = 'INCOMPATIBLE_STATIC_REPO';
+        const err = new Error(
+          compatibility.reason || 'Repository is not compatible with selected target.'
+        );
+        (err as Error & { code?: string; remediation?: string }).code =
+          'INCOMPATIBLE_STATIC_REPO';
         (err as Error & { code?: string; remediation?: string }).remediation =
           compatibility.remediation;
         throw err;
       }
 
       this.store.updateChecklist(deploymentId, { repositoryAnalyzed: true });
-      await stepDelay(record.dryRun ? 300 : 50);
+      await stepDelay(record.dryRun ? 200 : 50);
+
+      if (isAbortedOrTimedOut()) return;
 
       // Phase 1 Task 4 & Phase 8 Self-Healing Build Loop
       let buildResult;
@@ -349,6 +516,8 @@ export class DeploymentManager {
         }
       }
 
+      if (isAbortedOrTimedOut()) return;
+
       this.store.updateChecklist(deploymentId, { buildCompleted: true });
       this.store.addLog(
         deploymentId,
@@ -356,11 +525,12 @@ export class DeploymentManager {
         'SUCCESS',
         `Isolated build completed in ${buildResult.durationMs}ms.`
       );
-      await stepDelay(record.dryRun ? 300 : 50);
+      await stepDelay(record.dryRun ? 200 : 50);
 
       // Phase 2 Task 4: Request or configure ACM TLS certificate if custom subdomain requested
       let acmCertificateArn: string | undefined;
-      const latestRecord = this.store.get(deploymentId)!;
+      const latestRecord = this.store.get(deploymentId);
+      if (!latestRecord || isAbortedOrTimedOut()) return;
 
       if (latestRecord.subdomain && domainConfig) {
         setStatus(
@@ -378,7 +548,8 @@ export class DeploymentManager {
         this.store.updateResources(deploymentId, { acmCertificateArn });
       }
 
-      // Phase 1–6: Deploy to target AWS architecture
+      if (isAbortedOrTimedOut()) return;
+
       const deployStatusMsg =
         latestRecord.target === 'ECS_FARGATE'
           ? 'Provisioning Amazon ECR repository, ECS Cluster, Fargate Task Definition, and ALB routing...'
@@ -403,13 +574,14 @@ export class DeploymentManager {
           this.store.updateResources(deploymentId, resPatch),
       });
 
+      if (isAbortedOrTimedOut()) return;
+
       this.store.update(deploymentId, {
         infrastructureUrl: deployOutput.infrastructureUrl,
       });
       this.store.updateChecklist(deploymentId, { cloudResourcesConfigured: true });
-      await stepDelay(latestRecord.dryRun ? 300 : 50);
+      await stepDelay(latestRecord.dryRun ? 200 : 50);
 
-      // Phase 2 Tasks 6 & 7: Create Route 53 Alias record pointing to CloudFront/ALB & poll for DNS readiness
       let finalVerifiedUrl = deployOutput.infrastructureUrl;
       const isPlaceholderZone = sharedDomainManager.isPlaceholderDomainConfig(domainConfig);
       const isSimulatedAlb =
@@ -440,10 +612,11 @@ export class DeploymentManager {
         });
 
         finalVerifiedUrl = domainRes.httpsUrl;
-        await stepDelay(latestRecord.dryRun ? 300 : 50);
+        await stepDelay(latestRecord.dryRun ? 200 : 50);
       }
 
-      // Phase 1 Task 7 & Phase 2 Task 8: Verify HTTPS reachability before marking URL live
+      if (isAbortedOrTimedOut()) return;
+
       setStatus(
         'VERIFYING',
         `Phase 2 Task 8: Verifying HTTPS & TLS readiness for ${finalVerifiedUrl}...`
@@ -457,11 +630,14 @@ export class DeploymentManager {
         (msg) => this.store.addLog(deploymentId, 'VERIFYING', 'INFO', msg)
       );
 
+      if (isAbortedOrTimedOut()) return;
+
       this.store.updateChecklist(deploymentId, { httpsAndDomainVerified: true });
 
       const completedAt = new Date().toISOString();
       this.store.update(deploymentId, {
         status: 'LIVE',
+        queuePosition: null,
         url: finalVerifiedUrl,
         completedAt,
         error: null,
@@ -473,6 +649,7 @@ export class DeploymentManager {
         `Deployment verified and LIVE at ${finalVerifiedUrl}`
       );
     } catch (err: unknown) {
+      if (isAbortedOrTimedOut()) return;
       const errorObj = err as Error & { code?: string; remediation?: string };
       const message = errorObj?.message || 'Deployment failed.';
       const diagnosis = selfHealingEngine.diagnoseFailure(message, currentPhase);
@@ -481,6 +658,7 @@ export class DeploymentManager {
       this.store.addLog(deploymentId, currentPhase, 'ERROR', message);
       this.store.update(deploymentId, {
         status: 'FAILED',
+        queuePosition: null,
         url: null,
         error: {
           code,
@@ -495,7 +673,7 @@ export class DeploymentManager {
   }
 
   /**
-   * Phase 8: Manual 1-Click Self-Healing Retry for a FAILED deployment.
+   * Phase 8 & 9: Manual 1-Click Self-Healing Retry for a FAILED deployment via worker queue.
    */
   public async retryDeployment(deploymentId: string): Promise<{
     ok: boolean;
@@ -523,9 +701,13 @@ export class DeploymentManager {
       }
     }
 
+    const snap = this.queue.getSnapshot();
+    const willQueue = snap.activeWorkers >= snap.maxConcurrency;
     const nextRetryCount = (existing.retryCount || 0) + 1;
+
     const updated = this.store.update(deploymentId, {
-      status: 'BUILDING',
+      status: willQueue ? 'QUEUED' : 'BUILDING',
+      queuePosition: willQueue ? snap.queuedJobs + 1 : null,
       error: null,
       url: null,
       retryCount: nextRetryCount,
@@ -533,12 +715,12 @@ export class DeploymentManager {
 
     this.store.addLog(
       deploymentId,
-      'BUILDING',
+      willQueue ? 'QUEUED' : 'BUILDING',
       'INFO',
       `[Phase 8 Self-Healing] Initiating manual retry #${nextRetryCount} for ${existing.repoUrl}...`
     );
 
-    void this.executePipeline(deploymentId, `${existing.repoUrl}.git`, domainConfig);
+    this.enqueuePipelineExecution(deploymentId, `${existing.repoUrl}.git`, domainConfig);
 
     return {
       ok: true,
@@ -548,8 +730,7 @@ export class DeploymentManager {
   }
 
   /**
-   * Deletes all AWS infrastructure (S3 bucket, CloudFront OAC & distribution, Route 53 Alias record)
-   * and releases the reserved custom hostname in the database.
+   * Deletes all cloud infrastructure and releases the reserved custom hostname in the database.
    */
   public async deleteDeployment(deploymentId: string): Promise<{
     ok: boolean;
@@ -562,12 +743,12 @@ export class DeploymentManager {
       return { ok: false, statusCode: 404, error: `Deployment "${deploymentId}" not found.` };
     }
 
-    const deployer = getDeployerForTarget(existing.target);
+    const deployer = resolveDeployer(existing.cloudProvider || 'AWS', existing.target);
     this.store.addLog(
       deploymentId,
       existing.status,
       'INFO',
-      `Initiating AWS infrastructure & Route 53 cleanup for ${deploymentId}...`
+      `Initiating ${existing.cloudProvider || 'AWS'} infrastructure & DNS cleanup for ${deploymentId}...`
     );
 
     await deployer.cleanup(existing, existing.dryRun, (msg) =>
@@ -589,6 +770,7 @@ export class DeploymentManager {
 
     const updated = this.store.update(deploymentId, {
       status: 'DELETED',
+      queuePosition: null,
       url: null,
       infrastructureUrl: null,
     });
@@ -597,7 +779,7 @@ export class DeploymentManager {
       deploymentId,
       'DELETED',
       'SUCCESS',
-      `All AWS resources deleted and hostname ${existing.customHostname || '(none)'} released.`
+      `All cloud resources deleted and hostname ${existing.customHostname || '(none)'} released.`
     );
 
     return {

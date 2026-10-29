@@ -4,18 +4,33 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   AnalysisResult,
   analyzeRepository,
+  CloudProvider,
   createStaticDeployment,
+  createTeamOrganization,
   deleteDeploymentInfrastructure,
   DeploymentRecord,
   DeploymentTarget,
+  EnvironmentType,
+  ExecutionTenancy,
+  fetchCurrentSession,
   fetchDomainsAndCheckSubdomain,
   fetchObservabilityMetrics,
+  fetchQueueStatus,
   fetchSecurityStatus,
   getDeploymentStatus,
+  inviteOrganizationMember,
   listDeployments,
   ObservabilityMetrics,
+  OrganizationRecord,
+  OrgRole,
+  QueueSnapshot,
   retryFailedDeployment,
   SecurityGuardrailsStatus,
+  setStoredActiveOrgId,
+  signInSession,
+  signOutSession,
+  UserRecord,
+  WorkloadArchetype,
 } from '@/lib/api';
 
 type ThemeMode = 'aurora' | 'aws-sunset' | 'oceanic';
@@ -187,6 +202,24 @@ export default function Phase3DeployPage() {
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
+  // Phase 9 Sprint 1: Multi-Cloud Provider, Tenancy, Environment & Multi-Tenant Auth/RBAC State
+  const [cloudProvider, setCloudProvider] = useState<CloudProvider>('AWS');
+  const [tenancy, setTenancy] = useState<ExecutionTenancy>('DEPLOYMATE_MANAGED');
+  const [environment, setEnvironment] = useState<EnvironmentType>('production');
+  const [authUser, setAuthUser] = useState<UserRecord | null>(null);
+  const [organizations, setOrganizations] = useState<
+    Array<{ organization: OrganizationRecord; role: OrgRole }>
+  >([]);
+  const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
+  const [activeRole, setActiveRole] = useState<OrgRole | null>(null);
+  const [queueSnapshot, setQueueSnapshot] = useState<QueueSnapshot | null>(null);
+  const [authEmailInput, setAuthEmailInput] = useState('');
+  const [showOrgDrawer, setShowOrgDrawer] = useState(false);
+  const [newOrgName, setNewOrgName] = useState('');
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<OrgRole>('DEVELOPER');
+  const [workspaceNotice, setWorkspaceNotice] = useState<string | null>(null);
+
   // Phase 3 Dynamic Target & Target-Specific Form State
   const [selectedTarget, setSelectedTarget] = useState<DeploymentTarget>('S3_CLOUDFRONT');
   const [buildCommandOverride, setBuildCommandOverride] = useState('');
@@ -235,16 +268,32 @@ export default function Phase3DeployPage() {
 
   const refreshHistory = useCallback(async () => {
     try {
-      const [res, sec, obs] = await Promise.all([
+      const [res, sec, obs, qSnap] = await Promise.all([
         listDeployments(),
         fetchSecurityStatus().catch(() => null),
         fetchObservabilityMetrics().catch(() => null),
+        fetchQueueStatus().catch(() => null),
       ]);
       setHistory(res.deployments);
       if (sec) setSecurityStatus(sec);
       if (obs) setMetrics(obs);
+      if (qSnap) setQueueSnapshot(qSnap);
     } catch {
       // Ignore if backend is restarting
+    }
+  }, []);
+
+  const syncSessionFromBackend = useCallback(async () => {
+    try {
+      const me = await fetchCurrentSession();
+      if (me) {
+        setAuthUser(me.user);
+        setOrganizations(me.organizations);
+        setActiveOrgId(me.activeOrgId);
+        setActiveRole(me.activeRole);
+      }
+    } catch {
+      // Unauthenticated guest mode
     }
   }, []);
 
@@ -280,7 +329,7 @@ export default function Phase3DeployPage() {
     [branch]
   );
 
-  // Load server-controlled domains, history, and initial repository inspection on mount
+  // Load server-controlled domains, session, history, and initial repository inspection on mount
   useEffect(() => {
     fetchDomainsAndCheckSubdomain()
       .then((res) => {
@@ -290,9 +339,9 @@ export default function Phase3DeployPage() {
         }
       })
       .catch(() => {});
-    void refreshHistory();
+    void syncSessionFromBackend().then(() => refreshHistory());
     void runAnalysis('https://github.com/nmahendran-aws/sprout', 'main');
-  }, [refreshHistory, runAnalysis]);
+  }, [refreshHistory, runAnalysis, syncSessionFromBackend]);
 
   // Live validate subdomain format & reservation availability
   useEffect(() => {
@@ -355,9 +404,22 @@ export default function Phase3DeployPage() {
       }
     }
 
+    const derivedArchetype: WorkloadArchetype =
+      selectedTarget === 'ECS_FARGATE'
+        ? 'CONTAINER_SERVICE'
+        : selectedTarget === 'LAMBDA_API_GATEWAY'
+        ? 'SERVERLESS_FUNC'
+        : selectedTarget === 'AMPLIFY'
+        ? 'SSR_WEB'
+        : 'STATIC_EDGE';
+
     try {
       const res = await createStaticDeployment({
         repoUrl: repoUrl.trim(),
+        cloudProvider,
+        archetype: derivedArchetype,
+        tenancy,
+        environment,
         target: selectedTarget,
         branch: branch.trim() || 'main',
         subdomain: subdomain.trim() || undefined,
@@ -422,6 +484,102 @@ export default function Phase3DeployPage() {
     navigator.clipboard.writeText(urlToCopy);
     setCopiedUrl(urlToCopy);
     setTimeout(() => setCopiedUrl(null), 2000);
+  }
+
+  async function handleQuickSignIn(
+    email: string,
+    displayName: string,
+    provider: 'github' | 'google' | 'email'
+  ) {
+    setError(null);
+    setWorkspaceNotice(null);
+    try {
+      const session = await signInSession({
+        email,
+        displayName,
+        authProvider: provider,
+      });
+      setAuthUser(session.user);
+      setOrganizations(session.organizations);
+      setActiveOrgId(session.defaultOrganization.orgId);
+      const role =
+        session.organizations.find(
+          (o) => o.organization.orgId === session.defaultOrganization.orgId
+        )?.role || 'OWNER';
+      setActiveRole(role);
+      setAuthEmailInput('');
+      setWorkspaceNotice(
+        session.user.studentVerified
+          ? `Signed in as ${session.user.email} (.edu Verified Student — Campus Pro Eligible!)`
+          : `Signed in to ${session.defaultOrganization.name} (${role})`
+      );
+      await refreshHistory();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Sign-in failed');
+    }
+  }
+
+  async function handleSignOut() {
+    await signOutSession();
+    setAuthUser(null);
+    setOrganizations([]);
+    setActiveOrgId(null);
+    setActiveRole(null);
+    setShowOrgDrawer(false);
+    setWorkspaceNotice('Signed out — switched to Guest Sandbox mode.');
+    await refreshHistory();
+  }
+
+  async function handleSwitchOrg(nextOrgId: string) {
+    setStoredActiveOrgId(nextOrgId);
+    setActiveOrgId(nextOrgId);
+    const match = organizations.find((o) => o.organization.orgId === nextOrgId);
+    setActiveRole(match?.role || null);
+    setDeployment(null);
+    await refreshHistory();
+  }
+
+  async function handleCreateTeamOrg(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newOrgName.trim()) return;
+    setError(null);
+    try {
+      const res = await createTeamOrganization({
+        name: newOrgName.trim(),
+        planTier: 'GROWTH_TEAM',
+      });
+      const updatedOrgs = [
+        ...organizations,
+        { organization: res.organization, role: res.membership.role },
+      ];
+      setOrganizations(updatedOrgs);
+      setStoredActiveOrgId(res.organization.orgId);
+      setActiveOrgId(res.organization.orgId);
+      setActiveRole(res.membership.role);
+      setNewOrgName('');
+      setWorkspaceNotice(`Created team organization "${res.organization.name}" (OWNER).`);
+      await refreshHistory();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to create organization');
+    }
+  }
+
+  async function handleInviteMember(e: React.FormEvent) {
+    e.preventDefault();
+    if (!activeOrgId || !inviteEmail.trim()) return;
+    setError(null);
+    try {
+      const res = await inviteOrganizationMember(activeOrgId, {
+        email: inviteEmail.trim(),
+        role: inviteRole,
+      });
+      setInviteEmail('');
+      setWorkspaceNotice(
+        `Invited ${res.membership.userEmail} with RBAC role "${res.membership.role}".`
+      );
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to invite team member');
+    }
   }
 
   // Cost Calculation for Judge Demo Simulator
@@ -543,6 +701,183 @@ export default function Phase3DeployPage() {
       </header>
 
       <main className="max-w-6xl mx-auto px-6 py-7 space-y-6 relative z-10">
+        {/* Phase 9 Sprint 1: Multi-Tenant Identity, .edu Student Badge, Org Switcher, RBAC & Worker Queue Bar */}
+        <div className="rounded-2xl bg-slate-900/85 border border-white/15 p-4 shadow-xl backdrop-blur-xl space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            {authUser ? (
+              <div className="flex flex-wrap items-center gap-2.5">
+                <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-indigo-500/20 text-indigo-200 border border-indigo-500/40 font-mono">
+                  👤 {authUser.displayName} ({authUser.email})
+                </span>
+                {authUser.studentVerified && (
+                  <span className="text-[11px] font-extrabold px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/50">
+                    🎓 .edu Verified ({authUser.academicDomain})
+                  </span>
+                )}
+                {organizations.length > 0 && (
+                  <select
+                    value={activeOrgId || ''}
+                    onChange={(e) => void handleSwitchOrg(e.target.value)}
+                    className="rounded-xl bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs font-semibold text-cyan-200 focus:outline-none focus:border-cyan-400"
+                  >
+                    {organizations.map((entry) => (
+                      <option key={entry.organization.orgId} value={entry.organization.orgId}>
+                        🏢 {entry.organization.name} ({entry.role})
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {activeRole && (
+                  <span className="text-[11px] font-mono font-bold px-2.5 py-1 rounded-lg bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+                    RBAC: {activeRole}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowOrgDrawer((v) => !v)}
+                  className="text-xs px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
+                >
+                  {showOrgDrawer ? 'Close Team Settings' : '+ Team / RBAC'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleSignOut()}
+                  className="text-xs px-2.5 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 transition"
+                >
+                  Sign Out
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-slate-300 font-semibold">
+                  🔐 Multi-Tenant Workspace:
+                </span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void handleQuickSignIn('founder@deploymate.cloud', 'Startup Founder', 'github')
+                  }
+                  className="text-xs px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold border border-white/15 transition"
+                >
+                  Sign in with GitHub
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void handleQuickSignIn('alex@stanford.edu', 'Alex (.edu Student)', 'github')
+                  }
+                  className="text-xs px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 font-semibold border border-emerald-400/40 transition"
+                >
+                  🎓 Sign in (.edu Student)
+                </button>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="email"
+                    value={authEmailInput}
+                    onChange={(e) => setAuthEmailInput(e.target.value)}
+                    placeholder="you@university.edu or team@company.com"
+                    className="rounded-xl bg-slate-950 border border-slate-700 px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 w-56"
+                  />
+                  {authEmailInput.trim() && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void handleQuickSignIn(
+                          authEmailInput.trim(),
+                          authEmailInput.split('@')[0],
+                          'email'
+                        )
+                      }
+                      className="text-xs px-2.5 py-1.5 rounded-xl bg-cyan-500/20 text-cyan-200 border border-cyan-400/40 font-semibold"
+                    >
+                      Continue &rarr;
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Live Worker Queue Status Pill (DM-903) */}
+            <div className="flex items-center gap-2 text-[11px] font-mono bg-slate-950/90 px-3 py-1.5 rounded-xl border border-slate-800">
+              <span className="h-2 w-2 rounded-full bg-cyan-400 animate-pulse" />
+              <span className="text-slate-400">Worker Queue:</span>
+              <span className="text-cyan-300 font-bold">
+                {queueSnapshot
+                  ? `${queueSnapshot.activeWorkers}/${queueSnapshot.maxConcurrency} active`
+                  : '0/3 active'}
+              </span>
+              <span className="text-slate-500">&bull;</span>
+              <span className="text-amber-300">
+                {queueSnapshot ? `${queueSnapshot.queuedJobs} queued` : '0 queued'}
+              </span>
+            </div>
+          </div>
+
+          {workspaceNotice && (
+            <div className="text-xs text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-3 py-2 flex items-center justify-between">
+              <span>✓ {workspaceNotice}</span>
+              <button
+                type="button"
+                onClick={() => setWorkspaceNotice(null)}
+                className="text-slate-400 hover:text-white ml-2"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
+          {authUser && showOrgDrawer && (
+            <div className="pt-3 border-t border-white/10 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              <form
+                onSubmit={handleCreateTeamOrg}
+                className="rounded-xl bg-slate-950/90 border border-slate-800 p-3 flex items-center gap-2"
+              >
+                <input
+                  type="text"
+                  value={newOrgName}
+                  onChange={(e) => setNewOrgName(e.target.value)}
+                  placeholder="New Team Organization Name (e.g. Acme Cloud)"
+                  className="flex-1 rounded-lg bg-slate-900 border border-slate-800 px-3 py-1.5 text-xs text-white"
+                />
+                <button
+                  type="submit"
+                  className="px-3 py-1.5 rounded-lg bg-indigo-500/25 hover:bg-indigo-500/35 text-indigo-200 border border-indigo-400/40 font-semibold shrink-0"
+                >
+                  Create Org
+                </button>
+              </form>
+
+              <form
+                onSubmit={handleInviteMember}
+                className="rounded-xl bg-slate-950/90 border border-slate-800 p-3 flex flex-wrap items-center gap-2"
+              >
+                <input
+                  type="email"
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  placeholder="teammate@company.com"
+                  className="flex-1 min-w-[140px] rounded-lg bg-slate-900 border border-slate-800 px-3 py-1.5 text-xs text-white"
+                />
+                <select
+                  value={inviteRole}
+                  onChange={(e) => setInviteRole(e.target.value as OrgRole)}
+                  className="rounded-lg bg-slate-900 border border-slate-800 px-2.5 py-1.5 text-xs text-cyan-200 font-mono"
+                >
+                  <option value="ADMIN">ADMIN</option>
+                  <option value="DEVELOPER">DEVELOPER</option>
+                  <option value="VIEWER">VIEWER</option>
+                </select>
+                <button
+                  type="submit"
+                  className="px-3 py-1.5 rounded-lg bg-cyan-500/25 hover:bg-cyan-500/35 text-cyan-200 border border-cyan-400/40 font-semibold shrink-0"
+                >
+                  Invite Member
+                </button>
+              </form>
+            </div>
+          )}
+        </div>
+
         {/* Top Real-Time Telemetry & Guardrails Ribbon */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
           <div className="rounded-2xl bg-gradient-to-br from-emerald-500/15 via-slate-900/90 to-slate-900/90 border border-emerald-500/30 p-4 shadow-lg backdrop-blur">
@@ -879,6 +1214,116 @@ export default function Phase3DeployPage() {
             onSubmit={handleDeploy}
             className="rounded-3xl bg-slate-900/75 border border-white/10 p-6 sm:p-7 shadow-2xl backdrop-blur-xl space-y-6"
           >
+            {/* Phase 9 DM-901: Multi-Cloud Provider, Execution Tenancy & Environment Bar */}
+            <div className="rounded-2xl bg-slate-950/85 border border-white/10 p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-0.5 rounded-md text-[11px] font-bold uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    Multi-Cloud Engine
+                  </span>
+                  <span className="text-xs font-bold text-white">
+                    Select Cloud Provider, Tenancy &amp; Environment
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Execution Tenancy Toggle */}
+                  <div className="flex items-center bg-slate-900 p-1 rounded-xl border border-slate-800 text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() => setTenancy('DEPLOYMATE_MANAGED')}
+                      className={`px-2.5 py-1 rounded-lg font-semibold transition ${
+                        tenancy === 'DEPLOYMATE_MANAGED'
+                          ? 'bg-cyan-500/20 text-cyan-200 border border-cyan-500/40'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      ☁️ Managed Cloud
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTenancy('CUSTOMER_BYOC')}
+                      className={`px-2.5 py-1 rounded-lg font-semibold transition ${
+                        tenancy === 'CUSTOMER_BYOC'
+                          ? 'bg-indigo-500/20 text-indigo-200 border border-indigo-500/40'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      🔑 Customer BYOC (OIDC)
+                    </button>
+                  </div>
+
+                  {/* Environment Selector (RBAC-aware) */}
+                  <div className="flex items-center bg-slate-900 p-1 rounded-xl border border-slate-800 text-[11px]">
+                    {(['production', 'preview'] as EnvironmentType[]).map((envOpt) => (
+                      <button
+                        key={envOpt}
+                        type="button"
+                        onClick={() => setEnvironment(envOpt)}
+                        className={`px-2.5 py-1 rounded-lg font-mono font-semibold transition ${
+                          environment === envOpt
+                            ? envOpt === 'production'
+                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                              : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {envOpt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {[
+                  {
+                    id: 'AWS' as CloudProvider,
+                    title: 'Amazon Web Services (AWS)',
+                    sub: 'S3+CloudFront • ECS Fargate • Lambda • Amplify',
+                    badge: 'LIVE',
+                    badgeCls: 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40',
+                  },
+                  {
+                    id: 'GCP' as CloudProvider,
+                    title: 'Google Cloud Platform (GCP)',
+                    sub: 'Cloud Storage+CDN • Cloud Run • Cloud Functions',
+                    badge: 'Phase 10',
+                    badgeCls: 'bg-sky-500/20 text-sky-300 border-sky-400/40',
+                  },
+                  {
+                    id: 'AZURE' as CloudProvider,
+                    title: 'Microsoft Azure',
+                    sub: 'Blob+Front Door • Container Apps • Functions Flex',
+                    badge: 'Phase 11',
+                    badgeCls: 'bg-violet-500/20 text-violet-300 border-violet-400/40',
+                  },
+                ].map((p) => {
+                  const active = cloudProvider === p.id;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setCloudProvider(p.id)}
+                      className={`text-left rounded-xl p-3 border transition flex flex-col justify-between gap-1.5 ${
+                        active
+                          ? 'bg-slate-900 border-cyan-400/70 ring-1 ring-cyan-400/40 shadow-md'
+                          : 'bg-slate-950/70 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-white">{p.title}</span>
+                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${p.badgeCls}`}>
+                          {p.badge}
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-slate-400">{p.sub}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <div className="flex items-center gap-2">
@@ -1442,10 +1887,14 @@ export default function Phase3DeployPage() {
               className={`w-full py-3.5 px-6 rounded-2xl font-bold text-sm text-white bg-gradient-to-r ${currentTheme.primaryBtn} animate-gradient-x shadow-xl shadow-indigo-500/20 hover:scale-[1.005] active:scale-[0.995] transition-all disabled:opacity-50`}
             >
               {isDeploying
-                ? '🚀 Provisioning Live AWS Infrastructure...'
+                ? `🚀 Provisioning Live ${cloudProvider} Infrastructure...`
                 : subdomain.trim()
-                ? `🚀 Deploy to ${selectedTarget} → https://${subdomain.trim()}.${selectedDomain}`
-                : `🚀 Deploy to ${selectedTarget} (Provision Live AWS Stack)`}
+                ? `🚀 Deploy (${environment}) to ${cloudProvider} ${
+                    cloudProvider === 'AWS' ? selectedTarget : ''
+                  } → https://${subdomain.trim()}.${selectedDomain}`
+                : `🚀 Deploy (${environment}) to ${cloudProvider} (${
+                    cloudProvider === 'AWS' ? selectedTarget : 'Multi-Cloud Engine'
+                  })`}
             </button>
           </form>
         )}
@@ -1470,8 +1919,17 @@ export default function Phase3DeployPage() {
                         : 'bg-amber-500/20 text-amber-300 border-amber-400/50 animate-pulse'
                     }`}
                   >
-                    {deployment.status === 'LIVE' ? '● LIVE ON AWS' : deployment.status}
+                    {deployment.status === 'LIVE'
+                      ? `● LIVE ON ${deployment.cloudProvider || 'AWS'}`
+                      : deployment.status === 'QUEUED' && deployment.queuePosition
+                      ? `QUEUED (#${deployment.queuePosition})`
+                      : deployment.status}
                   </span>
+                  {deployment.environment && (
+                    <span className="text-xs font-mono px-2.5 py-1 rounded-lg bg-cyan-500/15 text-cyan-200 border border-cyan-500/30">
+                      env:{deployment.environment}
+                    </span>
+                  )}
                   <span className="text-xs font-mono px-2.5 py-1 rounded-lg bg-indigo-500/15 text-indigo-200 border border-indigo-500/30">
                     {deployment.target}
                   </span>

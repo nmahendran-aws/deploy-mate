@@ -7,6 +7,7 @@ import {
   DeploymentTarget,
   SignalDetection,
   TargetOptionAssessment,
+  WorkloadArchetype,
 } from '../types/deployment';
 
 export interface RepoInspectionSnapshot {
@@ -425,6 +426,15 @@ export class RepositoryAnalyzer {
         ? 'handler.handler'
         : 'index.handler';
 
+    const recommendedArchetype: WorkloadArchetype =
+      recommendedTarget === 'ECS_FARGATE'
+        ? 'CONTAINER_SERVICE'
+        : recommendedTarget === 'LAMBDA_API_GATEWAY'
+        ? 'SERVERLESS_FUNC'
+        : recommendedTarget === 'AMPLIFY'
+        ? 'SSR_WEB'
+        : 'STATIC_EDGE';
+
     const targetOptions = this.buildTargetOptions(
       recommendedTarget,
       framework,
@@ -438,6 +448,7 @@ export class RepositoryAnalyzer {
       buildCommand,
       outputDirectory,
       recommendedTarget,
+      recommendedArchetype,
       confidence,
       warnings,
       reasons,
@@ -450,6 +461,7 @@ export class RepositoryAnalyzer {
       buildCommand,
       outputDirectory,
       recommendedTarget,
+      recommendedArchetype,
       confidence,
       warnings,
       reasons,
@@ -475,6 +487,8 @@ export class RepositoryAnalyzer {
     const options: TargetOptionAssessment[] = [
       {
         target: 'S3_CLOUDFRONT',
+        cloudProvider: 'AWS',
+        archetype: 'STATIC_EDGE',
         title: 'S3 + CloudFront (OAC)',
         subtitle: 'Private S3 Origin + Global Edge CDN',
         fitScore: recommendedTarget === 'S3_CLOUDFRONT' ? 96 : applicationType === 'static-frontend' ? 90 : 35,
@@ -486,6 +500,8 @@ export class RepositoryAnalyzer {
       },
       {
         target: 'ECS_FARGATE',
+        cloudProvider: 'AWS',
+        archetype: 'CONTAINER_SERVICE',
         title: 'ECS Fargate + ALB',
         subtitle: 'Serverless Containers + Application Load Balancer',
         fitScore:
@@ -502,6 +518,8 @@ export class RepositoryAnalyzer {
       },
       {
         target: 'LAMBDA_API_GATEWAY',
+        cloudProvider: 'AWS',
+        archetype: 'SERVERLESS_FUNC',
         title: 'Lambda + API Gateway',
         subtitle: 'Event-Driven Serverless Functions + HTTP API v2',
         fitScore:
@@ -518,6 +536,8 @@ export class RepositoryAnalyzer {
       },
       {
         target: 'AMPLIFY',
+        cloudProvider: 'AWS',
+        archetype: 'SSR_WEB',
         title: 'AWS Amplify Hosting',
         subtitle: 'Managed Full-Stack CI/CD & Next.js SSR Compute',
         fitScore:
@@ -733,6 +753,12 @@ export class RepositoryAnalyzer {
       ECS_FARGATE: 'Amazon ECS Fargate container service behind an Application Load Balancer',
       LAMBDA_API_GATEWAY: 'AWS Lambda serverless function fronted by Amazon API Gateway',
       AMPLIFY: 'AWS Amplify Managed Hosting with SSR compute support',
+      GCP_STORAGE_CDN: 'Google Cloud Storage + Cloud CDN with Managed SSL',
+      GCP_CLOUD_RUN: 'Google Cloud Run serverless container service',
+      GCP_CLOUD_FUNCTIONS: 'Google Cloud Functions Gen2 + API Gateway',
+      AZURE_STATIC_FRONTDOOR: 'Azure Blob Storage + Azure Front Door CDN',
+      AZURE_CONTAINER_APPS: 'Azure Container Apps + Azure Container Registry',
+      AZURE_FUNCTIONS: 'Azure Functions Flex Consumption',
     };
 
     const buildPart = result.buildCommand
