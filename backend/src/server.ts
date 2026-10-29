@@ -6,6 +6,7 @@ import path from 'path';
 import { createAuthMiddlewares } from './middleware/authMiddleware';
 import { createAuthAndOrgRouter } from './routes/authAndOrgRoutes';
 import { createDeployRouter } from './routes/deployRoutes';
+import { createGitHubAndSecretsRouter } from './routes/githubAndSecretsRoutes';
 import { DeploymentJobQueue, deploymentJobQueue } from './services/deploymentJobQueue';
 import { DeploymentManager, deploymentManager } from './services/deploymentManager';
 import { DeploymentStore, deploymentStore } from './store/deploymentStore';
@@ -26,11 +27,25 @@ export function createApp(
     cors({
       origin: true,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Org-Id'],
+      allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'X-Org-Id',
+        'X-Hub-Signature-256',
+        'X-GitHub-Event',
+        'X-GitHub-Delivery',
+      ],
       credentials: true,
     })
   );
-  instance.use(express.json({ limit: '64kb' }));
+  instance.use(
+    express.json({
+      limit: '64kb',
+      verify: (req, _res, buf) => {
+        (req as Request & { rawBody?: Buffer }).rawBody = Buffer.from(buf);
+      },
+    })
+  );
 
   // Phase 7: Lightweight per-IP rate limiting middleware for abuse prevention
   const requestCounts = new Map<string, { count: number; resetAt: number }>();
@@ -82,6 +97,7 @@ export function createApp(
   const { attachAuthIfPresent } = createAuthMiddlewares(store);
   instance.use('/api', attachAuthIfPresent);
   instance.use('/api', createAuthAndOrgRouter(store));
+  instance.use('/api', createGitHubAndSecretsRouter(store, manager));
   instance.use('/api', createDeployRouter(store, manager, queue));
 
   // Serve Next.js static export frontend from /frontend/out when available

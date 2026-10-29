@@ -6,6 +6,7 @@ export interface DeploymentQueuePayload {
   cloneUrl: string;
   domainConfig?: ConfiguredDomain;
   userEnvVars?: Record<string, string>;
+  ephemeralGitHubToken?: string;
 }
 
 export type WorkerJobProcessor = (payload: DeploymentQueuePayload) => Promise<void>;

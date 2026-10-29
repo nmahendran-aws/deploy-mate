@@ -10,9 +10,13 @@ import {
   TrackedCloudResources,
 } from '../types/deployment';
 import {
+  EncryptedSecretRecord,
+  EnvironmentType,
+  GitHubInstallationRecord,
   MembershipRecord,
   OrganizationRecord,
   OrgRole,
+  PrPreviewCommentRecord,
   ProjectRecord,
   UserRecord,
 } from '../types/tenant';
@@ -30,6 +34,13 @@ export interface PersistedDatabase {
   organizations: Record<string, OrganizationRecord>;
   memberships: Record<string, MembershipRecord>;
   projects: Record<string, ProjectRecord>;
+  /**
+   * DM-906 / DM-907 / DM-908 / DM-913: Sprint 2 Secrets Vault, GitHub App & Webhook State
+   */
+  encryptedSecrets: Record<string, EncryptedSecretRecord>;
+  githubInstallations: Record<string, GitHubInstallationRecord>;
+  prPreviewComments: Record<string, PrPreviewCommentRecord>;
+  processedWebhookDeliveries: Record<string, string>;
 }
 
 /**
@@ -79,6 +90,8 @@ export class DeploymentStore implements IDeploymentRepository {
   private dynamoClient?: DynamoDBClient;
   private dynamoTableName?: string;
   private pgPool?: MinimalPgPool;
+  /** In-memory secret values registered per deployment for automatic audit log scrubbing (DM-913) */
+  private readonly secretRedactions: Map<string, string[]> = new Map();
   public readonly events: EventEmitter = new EventEmitter();
 
   constructor(customFilePath?: string) {
@@ -135,6 +148,10 @@ export class DeploymentStore implements IDeploymentRepository {
           organizations: parsed.organizations || {},
           memberships: parsed.memberships || {},
           projects: parsed.projects || {},
+          encryptedSecrets: parsed.encryptedSecrets || {},
+          githubInstallations: parsed.githubInstallations || {},
+          prPreviewComments: parsed.prPreviewComments || {},
+          processedWebhookDeliveries: parsed.processedWebhookDeliveries || {},
         };
       }
     } catch {
@@ -147,6 +164,10 @@ export class DeploymentStore implements IDeploymentRepository {
       organizations: {},
       memberships: {},
       projects: {},
+      encryptedSecrets: {},
+      githubInstallations: {},
+      prPreviewComments: {},
+      processedWebhookDeliveries: {},
     };
   }
 
@@ -355,6 +376,33 @@ export class DeploymentStore implements IDeploymentRepository {
     return updated;
   }
 
+  /**
+   * Registers sensitive plaintext values in-memory ONLY so any accidental occurrence
+   * in build/deploy logs is scrubbed to "[REDACTED]" before persistence or SSE broadcast (DM-913).
+   */
+  public registerSecretRedactions(deploymentId: string, secretValues: string[]): void {
+    const filtered = secretValues.filter((v) => typeof v === 'string' && v.length >= 4);
+    if (filtered.length > 0) {
+      this.secretRedactions.set(deploymentId, filtered);
+    }
+  }
+
+  public clearSecretRedactions(deploymentId: string): void {
+    this.secretRedactions.delete(deploymentId);
+  }
+
+  private scrubSecretValues(deploymentId: string, rawMessage: string): string {
+    const secrets = this.secretRedactions.get(deploymentId);
+    if (!secrets || secrets.length === 0) return rawMessage;
+    let scrubbed = rawMessage;
+    for (const secretVal of secrets) {
+      if (secretVal && scrubbed.includes(secretVal)) {
+        scrubbed = scrubbed.split(secretVal).join('[REDACTED]');
+      }
+    }
+    return scrubbed;
+  }
+
   public addLog(
     deploymentId: string,
     phase: DeploymentStatus,
@@ -368,7 +416,7 @@ export class DeploymentStore implements IDeploymentRepository {
       timestamp: new Date().toISOString(),
       phase,
       level,
-      message,
+      message: this.scrubSecretValues(deploymentId, message),
     };
 
     existing.auditLogs.push(entry);
@@ -539,6 +587,180 @@ export class DeploymentStore implements IDeploymentRepository {
     return Object.values(this.db.projects)
       .filter((p) => p.orgId === orgId)
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  public updateProject(
+    projectId: string,
+    patch: Partial<Omit<ProjectRecord, 'projectId' | 'orgId' | 'createdAt'>>
+  ): ProjectRecord | undefined {
+    const existing = this.db.projects[projectId];
+    if (!existing) return undefined;
+    const updated: ProjectRecord = {
+      ...existing,
+      ...patch,
+      updatedAt: new Date().toISOString(),
+    };
+    this.db.projects[projectId] = updated;
+    this.saveToDisk();
+    return updated;
+  }
+
+  public findProjectsByRepoUrl(repoUrl: string): ProjectRecord[] {
+    const norm = repoUrl.trim().replace(/\.git$/i, '').toLowerCase();
+    return Object.values(this.db.projects).filter(
+      (p) => p.repoUrl.trim().replace(/\.git$/i, '').toLowerCase() === norm
+    );
+  }
+
+  // ============================================================================
+  // DM-913 (#13): Encrypted Secrets Vault Persistence (Ciphertext Only)
+  // ============================================================================
+
+  public upsertEncryptedSecret(record: EncryptedSecretRecord): EncryptedSecretRecord {
+    const existing = Object.values(this.db.encryptedSecrets).find(
+      (s) =>
+        s.projectId === record.projectId &&
+        s.environment === record.environment &&
+        s.key === record.key
+    );
+    if (existing) {
+      const updated: EncryptedSecretRecord = {
+        ...existing,
+        ciphertext: record.ciphertext,
+        iv: record.iv,
+        authTag: record.authTag,
+        maskedPreview: record.maskedPreview,
+        updatedByUserId: record.updatedByUserId,
+        updatedAt: record.updatedAt,
+      };
+      this.db.encryptedSecrets[existing.secretId] = updated;
+      this.saveToDisk();
+      return updated;
+    }
+    this.db.encryptedSecrets[record.secretId] = record;
+    this.saveToDisk();
+    return record;
+  }
+
+  public listEncryptedSecrets(
+    projectId: string,
+    environment?: EnvironmentType
+  ): EncryptedSecretRecord[] {
+    return Object.values(this.db.encryptedSecrets)
+      .filter(
+        (s) =>
+          s.projectId === projectId && (!environment || s.environment === environment)
+      )
+      .sort((a, b) => a.key.localeCompare(b.key));
+  }
+
+  public deleteEncryptedSecret(
+    projectId: string,
+    environment: EnvironmentType,
+    key: string
+  ): boolean {
+    const found = Object.values(this.db.encryptedSecrets).find(
+      (s) =>
+        s.projectId === projectId &&
+        s.environment === environment &&
+        s.key === key
+    );
+    if (!found) return false;
+    delete this.db.encryptedSecrets[found.secretId];
+    this.saveToDisk();
+    return true;
+  }
+
+  // ============================================================================
+  // DM-906, DM-907, DM-908: GitHub App Installations, Webhook Replay & PR Comments
+  // ============================================================================
+
+  public upsertGitHubInstallation(
+    record: GitHubInstallationRecord
+  ): GitHubInstallationRecord {
+    this.db.githubInstallations[record.installationId] = record;
+    this.saveToDisk();
+    return record;
+  }
+
+  public getGitHubInstallation(
+    installationId: string
+  ): GitHubInstallationRecord | undefined {
+    return this.db.githubInstallations[installationId];
+  }
+
+  public listGitHubInstallationsForOrg(orgId: string): GitHubInstallationRecord[] {
+    return Object.values(this.db.githubInstallations).filter(
+      (inst) => inst.orgId === orgId
+    );
+  }
+
+  public findGitHubInstallationForRepo(
+    fullName: string,
+    orgId?: string
+  ): GitHubInstallationRecord | undefined {
+    const norm = fullName.trim().toLowerCase();
+    return Object.values(this.db.githubInstallations).find(
+      (inst) =>
+        (!orgId || inst.orgId === orgId) &&
+        inst.repositories.some((r) => r.fullName.toLowerCase() === norm)
+    );
+  }
+
+  /**
+   * Atomically records a GitHub X-GitHub-Delivery ID to prevent replay attacks (TC-907-01).
+   * Returns true if newly processed, false if duplicate replay.
+   */
+  public markWebhookDeliveryProcessed(deliveryId: string): boolean {
+    if (this.db.processedWebhookDeliveries[deliveryId]) {
+      return false;
+    }
+    this.db.processedWebhookDeliveries[deliveryId] = new Date().toISOString();
+    this.saveToDisk();
+    return true;
+  }
+
+  public findActivePreviewDeployment(
+    repoUrl: string,
+    prNumber: number
+  ): DeploymentRecord | undefined {
+    const norm = repoUrl.trim().replace(/\.git$/i, '').toLowerCase();
+    return Object.values(this.db.deployments)
+      .filter(
+        (d) =>
+          d.repoUrl.trim().replace(/\.git$/i, '').toLowerCase() === norm &&
+          d.prNumber === prNumber &&
+          d.status !== 'DELETED'
+      )
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+  }
+
+  public upsertPrPreviewComment(
+    record: PrPreviewCommentRecord
+  ): PrPreviewCommentRecord {
+    const key = `${record.repoFullName.toLowerCase()}#${record.prNumber}`;
+    const existing = this.db.prPreviewComments[key];
+    const merged: PrPreviewCommentRecord = existing
+      ? {
+          ...existing,
+          deploymentId: record.deploymentId,
+          previewUrl: record.previewUrl,
+          status: record.status,
+          markdownBody: record.markdownBody,
+          updatedAt: record.updatedAt,
+        }
+      : record;
+    this.db.prPreviewComments[key] = merged;
+    this.saveToDisk();
+    return merged;
+  }
+
+  public getPrPreviewComment(
+    repoFullName: string,
+    prNumber: number
+  ): PrPreviewCommentRecord | undefined {
+    const key = `${repoFullName.toLowerCase()}#${prNumber}`;
+    return this.db.prPreviewComments[key];
   }
 }
 

@@ -2,6 +2,7 @@
 process.env.FORCE_DRY_RUN_TEST = 'true';
 
 import assert from 'assert';
+import crypto from 'crypto';
 import fs from 'fs';
 import http from 'http';
 import net from 'net';
@@ -15,8 +16,11 @@ import { createApp } from '../server';
 import { authService, detectAcademicStudentEmail } from '../services/authService';
 import { DeploymentJobQueue } from '../services/deploymentJobQueue';
 import { DeploymentManager } from '../services/deploymentManager';
+import { githubAppService } from '../services/githubAppService';
+import { computeGitHubWebhookSignature } from '../services/githubWebhookService';
 import { isolatedBuildRunner } from '../services/isolatedBuilder';
 import { RepositoryAnalyzer } from '../services/repositoryAnalyzer';
+import { secretsVault } from '../services/secretsVault';
 import { securityGuardrails } from '../services/securityGuardrails';
 import { selfHealingEngine } from '../services/selfHealingEngine';
 import { DeploymentStore } from '../store/deploymentStore';
@@ -434,6 +438,7 @@ async function invokeApp(
   urlPath: string,
   opts?: {
     body?: unknown;
+    rawBody?: string;
     headers?: Record<string, string>;
   }
 ): Promise<{
@@ -451,7 +456,12 @@ async function invokeApp(
     req.method = method;
     req.url = urlPath;
 
-    const rawBody = opts?.body !== undefined ? JSON.stringify(opts.body) : undefined;
+    const rawBody =
+      opts?.rawBody !== undefined
+        ? opts.rawBody
+        : opts?.body !== undefined
+        ? JSON.stringify(opts.body)
+        : undefined;
     const lowerHeaders: Record<string, string> = {};
     if (opts?.headers) {
       for (const [k, v] of Object.entries(opts.headers)) {
@@ -1036,12 +1046,695 @@ async function runPhase9Sprint1Tests(): Promise<void> {
   }
 
   console.log('   ✓ DM-905 (TC-905-01 RBAC Matrix & TC-905-02 Cross-Tenant IDOR 404) passed.\n');
-  console.log('ALL PHASE 9 · SPRINT 1 TESTS (DM-901, DM-902, DM-903, DM-904, DM-905) PASSED!');
+  console.log('ALL PHASE 9 · SPRINT 1 TESTS (DM-901, DM-902, DM-903, DM-904, DM-905) PASSED!\n');
+}
+
+async function runPhase9Sprint2Tests(): Promise<void> {
+  console.log('=== DeployMate Phase 9 · Sprint 2 Verification Suite (DM-906, DM-907, DM-908, DM-913) ===\n');
+
+  const tmpDbPath = path.join(os.tmpdir(), `deploymate-phase9-sprint2-${Date.now()}.json`);
+  const store = new DeploymentStore(tmpDbPath);
+  const queue = new DeploymentJobQueue({
+    maxConcurrency: 3,
+    maxQueueBacklog: 30,
+    jobTimeoutMs: 15_000,
+  });
+  const manager = new DeploymentManager(store, queue);
+  const testApp = createApp(store, manager, queue);
+
+  const waitUntilSettled = async (deploymentId: string) => {
+    for (let i = 0; i < 60; i++) {
+      const cur = store.get(deploymentId);
+      if (cur && (cur.status === 'LIVE' || cur.status === 'FAILED' || cur.status === 'DELETED')) {
+        return cur;
+      }
+      await new Promise((r) => setTimeout(r, 120));
+    }
+    throw new Error(`Deployment ${deploymentId} did not settle within timeout.`);
+  };
+
+  // Onboard Org A (OWNER + ADMIN + DEVELOPER) and Org B (external tenant)
+  const ownerRes = await invokeApp(testApp, 'POST', '/api/auth/session', {
+    body: { email: 'owner@acme-cloud.io', displayName: 'Acme Owner', authProvider: 'github' },
+  });
+  assert.strictEqual(ownerRes.status, 200);
+  const ownerSession = ownerRes.json<{
+    token: string;
+    defaultOrganization: { orgId: string };
+  }>();
+  const orgAId = ownerSession.defaultOrganization.orgId;
+
+  await invokeApp(testApp, 'POST', `/api/orgs/${orgAId}/members`, {
+    headers: { Authorization: `Bearer ${ownerSession.token}` },
+    body: { email: 'admin@acme-cloud.io', role: 'ADMIN' },
+  });
+  await invokeApp(testApp, 'POST', `/api/orgs/${orgAId}/members`, {
+    headers: { Authorization: `Bearer ${ownerSession.token}` },
+    body: { email: 'dev@acme-cloud.io', role: 'DEVELOPER' },
+  });
+
+  const adminToken = (
+    await invokeApp(testApp, 'POST', '/api/auth/session', {
+      body: { email: 'admin@acme-cloud.io' },
+    })
+  ).json<{ token: string }>().token;
+
+  const devToken = (
+    await invokeApp(testApp, 'POST', '/api/auth/session', {
+      body: { email: 'dev@acme-cloud.io' },
+    })
+  ).json<{ token: string }>().token;
+
+  const orgBSession = (
+    await invokeApp(testApp, 'POST', '/api/auth/session', {
+      body: { email: 'attacker@other-org.io' },
+    })
+  ).json<{ token: string; defaultOrganization: { orgId: string } }>();
+
+  // ==========================================================================
+  // DM-906 (#6): Private GitHub App Installation Tokens & Exfiltration Defense
+  // ==========================================================================
+  console.log('15. Testing DM-906 (RS256 GitHub App JWT, Paginated Repo Picker & Zero-Exfiltration Build Sandbox)...');
+
+  // Verify RS256 GitHub App JWT cryptographic signing
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
+    modulusLength: 2048,
+  });
+  const privatePem = privateKey.export({ type: 'pkcs1', format: 'pem' }).toString();
+  const publicPem = publicKey.export({ type: 'pkcs1', format: 'pem' }).toString();
+  const appJwt = githubAppService.signAppJwt('987654', privatePem);
+  const [jwtH, jwtP, jwtS] = appJwt.split('.');
+  const verifier = crypto.createVerify('RSA-SHA256');
+  verifier.update(`${jwtH}.${jwtP}`);
+  verifier.end();
+  const sigBuf = Buffer.from(jwtS.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+  assert.strictEqual(verifier.verify(publicPem, sigBuf), true, 'RS256 GitHub App JWT signature must verify');
+
+  // TC-906-02: Connect GitHub App installation (DEVELOPER blocked 403, ADMIN allowed 201) & list paginated repos
+  const devConnectBlocked = await invokeApp(testApp, 'POST', '/api/github/installations', {
+    headers: { Authorization: `Bearer ${devToken}`, 'X-Org-Id': orgAId },
+    body: { accountLogin: 'acme-cloud' },
+  });
+  assert.strictEqual(devConnectBlocked.status, 403);
+
+  const connectInstRes = await invokeApp(testApp, 'POST', '/api/github/installations', {
+    headers: { Authorization: `Bearer ${adminToken}`, 'X-Org-Id': orgAId },
+    body: {
+      accountLogin: 'acme-cloud',
+      accountType: 'Organization',
+      repositories: [
+        { name: 'commercial-saas-web', private: true, defaultBranch: 'main', branches: ['main', 'staging', 'feat/pr-42'] },
+        { name: 'payments-worker', private: true, defaultBranch: 'main', branches: ['main'] },
+        { name: 'docs-portal', private: false, defaultBranch: 'main', branches: ['main'] },
+      ],
+    },
+  });
+  assert.strictEqual(connectInstRes.status, 201);
+
+  const page1Res = await invokeApp(testApp, 'GET', '/api/github/repos?page=1&perPage=2', {
+    headers: { Authorization: `Bearer ${devToken}`, 'X-Org-Id': orgAId },
+  });
+  assert.strictEqual(page1Res.status, 200);
+  const page1Data = page1Res.json<{
+    repositories: Array<{ fullName: string; private: boolean; branches: string[] }>;
+    totalCount: number;
+    totalPages: number;
+  }>();
+  assert.strictEqual(page1Data.repositories.length, 2);
+  assert.strictEqual(page1Data.totalCount, 3);
+  assert.strictEqual(page1Data.totalPages, 2);
+  assert.strictEqual(page1Data.repositories[0].fullName, 'acme-cloud/commercial-saas-web');
+  assert.strictEqual(page1Data.repositories[0].private, true);
+  assert.ok(page1Data.repositories[0].branches.includes('feat/pr-42'));
+
+  // Cross-org check: Org B sees 0 repositories from Org A's GitHub App installation
+  const orgBReposRes = await invokeApp(testApp, 'GET', '/api/github/repos', {
+    headers: {
+      Authorization: `Bearer ${orgBSession.token}`,
+      'X-Org-Id': orgBSession.defaultOrganization.orgId,
+    },
+  });
+  assert.strictEqual(orgBReposRes.json<{ totalCount: number }>().totalCount, 0);
+
+  // TC-906-01: Security Exfiltration Test — malicious build script dumping process.env and .git/config
+  const exfilWorkspace = path.join(os.tmpdir(), `dm-exfil-test-${Date.now()}`);
+  const exfilRepoDir = path.join(exfilWorkspace, 'repo');
+  fs.mkdirSync(path.join(exfilRepoDir, '.git'), { recursive: true });
+
+  const sensitiveInstallToken = 'dm_test_install_tok_999888777';
+  const sensitiveAwsSecret = 'dm_test_aws_host_secret_555';
+  fs.writeFileSync(
+    path.join(exfilRepoDir, '.git', 'config'),
+    `[core]\n\trepositoryformatversion = 0\n[remote "origin"]\n\turl = https://x-access-token:${sensitiveInstallToken}@github.com/acme-cloud/commercial-saas-web.git\n\textraheader = AUTHORIZATION: bearer ${sensitiveInstallToken}\n`,
+    'utf8'
+  );
+  fs.writeFileSync(
+    path.join(exfilRepoDir, 'package.json'),
+    JSON.stringify({
+      name: 'exfil-probe',
+      version: '1.0.0',
+      scripts: { build: 'node dump-leak.js' },
+    }),
+    'utf8'
+  );
+  fs.writeFileSync(
+    path.join(exfilRepoDir, 'dump-leak.js'),
+    `const fs = require('fs');
+const path = require('path');
+fs.mkdirSync(path.join(__dirname, 'dist'), { recursive: true });
+const gitCfg = fs.existsSync(path.join(__dirname, '.git/config'))
+  ? fs.readFileSync(path.join(__dirname, '.git/config'), 'utf8')
+  : '';
+const dump = JSON.stringify({ env: process.env, gitConfig: gitCfg }, null, 2);
+fs.writeFileSync(path.join(__dirname, 'dist/leak.txt'), dump, 'utf8');
+fs.writeFileSync(path.join(__dirname, 'dist/index.html'), '<h1>Built</h1>', 'utf8');
+`,
+    'utf8'
+  );
+
+  const prevAwsSecret = process.env.AWS_SECRET_ACCESS_KEY;
+  process.env.AWS_SECRET_ACCESS_KEY = sensitiveAwsSecret;
+  try {
+    const exfilAnalysis = new RepositoryAnalyzer().analyzeDirectory(exfilRepoDir);
+    exfilAnalysis.buildCommand = 'npm run build';
+    exfilAnalysis.outputDirectory = 'dist';
+
+    const buildOut = await isolatedBuildRunner.runIsolatedBuild({
+      deploymentId: 'dep_exfil906',
+      workspaceDir: exfilWorkspace,
+      repoDir: exfilRepoDir,
+      clonedFromRemote: true,
+      repoUrl: 'https://github.com/acme-cloud/commercial-saas-web',
+      analysis: exfilAnalysis,
+      userEnvVars: {
+        PUBLIC_APP_NAME: 'AcmeCommercial',
+        GITHUB_TOKEN: sensitiveInstallToken, // even if someone tried injecting GITHUB_*, worker strips it
+      },
+      dryRun: false,
+    });
+
+    assert.ok(buildOut.generatedFiles.includes('leak.txt'), 'Untrusted build script must have run');
+    const leakDump = fs.readFileSync(path.join(exfilRepoDir, 'dist', 'leak.txt'), 'utf8');
+    assert.strictEqual(
+      leakDump.includes(sensitiveInstallToken),
+      false,
+      'TC-906-01 FAILED: GitHub installation token leaked into build environment or .git/config!'
+    );
+    assert.strictEqual(
+      leakDump.includes(sensitiveAwsSecret),
+      false,
+      'TC-906-01 FAILED: Host AWS_SECRET_ACCESS_KEY leaked into build worker!'
+    );
+    assert.ok(
+      leakDump.includes('AcmeCommercial'),
+      'Expected whitelisted non-cloud user env var to be available during build'
+    );
+  } finally {
+    if (prevAwsSecret === undefined) delete process.env.AWS_SECRET_ACCESS_KEY;
+    else process.env.AWS_SECRET_ACCESS_KEY = prevAwsSecret;
+    fs.rmSync(exfilWorkspace, { recursive: true, force: true });
+  }
+  console.log('   ✓ DM-906 (TC-906-01 Zero-Exfiltration Sandbox & TC-906-02 Paginated Private Repos) passed.');
+
+  // ==========================================================================
+  // DM-907 (#7): HMAC GitHub Push Webhooks, Replay Deduplication & Instant Rollback
+  // ==========================================================================
+  console.log('16. Testing DM-907 (HMAC-SHA256 Push Webhooks, Replay Protection & <10s Instant Rollback)...');
+
+  // Create project in Org A linked to acme-cloud/commercial-saas-web
+  const createProjRes = await invokeApp(testApp, 'POST', `/api/orgs/${orgAId}/projects`, {
+    headers: { Authorization: `Bearer ${adminToken}`, 'X-Org-Id': orgAId },
+    body: {
+      name: 'Commercial SaaS Web',
+      slug: 'commercial-saas-web',
+      repoUrl: 'https://github.com/acme-cloud/commercial-saas-web',
+      defaultBranch: 'main',
+    },
+  });
+  assert.strictEqual(createProjRes.status, 201);
+  const saasProjectId = createProjRes.json<{ project: { projectId: string } }>().project.projectId;
+
+  const pushPayloadV1 = {
+    ref: 'refs/heads/main',
+    after: 'a1b2c3d4e5f60001a1b2c3d4e5f60001a1b2c3d4',
+    repository: {
+      full_name: 'acme-cloud/commercial-saas-web',
+      html_url: 'https://github.com/acme-cloud/commercial-saas-web',
+      default_branch: 'main',
+    },
+    head_commit: {
+      id: 'a1b2c3d4e5f60001a1b2c3d4e5f60001a1b2c3d4',
+      message: 'feat: launch v1 billing',
+      author: { username: 'jane-dev' },
+    },
+  };
+  const rawPushV1 = JSON.stringify(pushPayloadV1);
+  const validSigV1 = computeGitHubWebhookSignature(rawPushV1);
+
+  // TC-907-01a: Missing signature -> 401
+  const missingSigRes = await invokeApp(testApp, 'POST', '/api/webhooks/github', {
+    rawBody: rawPushV1,
+    headers: { 'X-GitHub-Event': 'push' },
+  });
+  assert.strictEqual(missingSigRes.status, 401);
+
+  // TC-907-01b: Tampered raw body with original signature -> 401
+  const tamperedRaw = rawPushV1.replace('feat: launch v1 billing', 'feat: evil tampered commit');
+  const tamperedSigRes = await invokeApp(testApp, 'POST', '/api/webhooks/github', {
+    rawBody: tamperedRaw,
+    headers: {
+      'X-GitHub-Event': 'push',
+      'X-Hub-Signature-256': validSigV1,
+    },
+  });
+  assert.strictEqual(tamperedSigRes.status, 401);
+
+  // TC-907-01c: Valid HMAC signature triggers automatic production deployment (v1)
+  const validPushV1Res = await invokeApp(testApp, 'POST', '/api/webhooks/github', {
+    rawBody: rawPushV1,
+    headers: {
+      'X-GitHub-Event': 'push',
+      'X-GitHub-Delivery': 'delivery-v1-001',
+      'X-Hub-Signature-256': validSigV1,
+    },
+  });
+  assert.strictEqual(validPushV1Res.status, 202);
+  const v1Body = validPushV1Res.json<{
+    deploymentId: string;
+    environment: string;
+    githubCheckStatus: string;
+  }>();
+  assert.strictEqual(v1Body.environment, 'production');
+  assert.strictEqual(v1Body.githubCheckStatus, 'pending');
+
+  // TC-907-01d: Replay identical X-GitHub-Delivery ID -> idempotent 200 deduplicated skip
+  const replayPushRes = await invokeApp(testApp, 'POST', '/api/webhooks/github', {
+    rawBody: rawPushV1,
+    headers: {
+      'X-GitHub-Event': 'push',
+      'X-GitHub-Delivery': 'delivery-v1-001',
+      'X-Hub-Signature-256': validSigV1,
+    },
+  });
+  assert.strictEqual(replayPushRes.status, 200);
+  assert.strictEqual(replayPushRes.json<{ deduplicated: boolean }>().deduplicated, true);
+
+  const settledV1 = await waitUntilSettled(v1Body.deploymentId);
+  assert.strictEqual(settledV1.status, 'LIVE');
+  assert.strictEqual(settledV1.githubCheckStatus, 'success');
+  assert.strictEqual(settledV1.isProductionActive, true);
+  assert.ok(settledV1.artifactUri, 'Expected immutable artifactUri on LIVE deployment');
+  assert.strictEqual(store.getProject(saasProjectId)?.activeProductionDeploymentId, v1Body.deploymentId);
+
+  // Deploy v2 via GitHub push so we can test 1-click Instant Rollback from v2 -> v1
+  const pushPayloadV2 = {
+    ...pushPayloadV1,
+    after: 'b2c3d4e5f6a70002b2c3d4e5f6a70002b2c3d4e5',
+    head_commit: {
+      id: 'b2c3d4e5f6a70002b2c3d4e5f6a70002b2c3d4e5',
+      message: 'feat: v2 UI update',
+      author: { username: 'jane-dev' },
+    },
+  };
+  const rawPushV2 = JSON.stringify(pushPayloadV2);
+  const validPushV2Res = await invokeApp(testApp, 'POST', '/api/webhooks/github', {
+    rawBody: rawPushV2,
+    headers: {
+      'X-GitHub-Event': 'push',
+      'X-GitHub-Delivery': 'delivery-v2-002',
+      'X-Hub-Signature-256': computeGitHubWebhookSignature(rawPushV2),
+    },
+  });
+  assert.strictEqual(validPushV2Res.status, 202);
+  const v2DepId = validPushV2Res.json<{ deploymentId: string }>().deploymentId;
+  await waitUntilSettled(v2DepId);
+
+  assert.strictEqual(store.getProject(saasProjectId)?.activeProductionDeploymentId, v2DepId);
+  assert.strictEqual(store.get(v1Body.deploymentId)?.isProductionActive, false);
+  assert.strictEqual(store.get(v2DepId)?.isProductionActive, true);
+
+  // TC-907-02: DEVELOPER blocked (403), Cross-Org blocked (404), ADMIN Instant Rollback succeeds in <50ms!
+  const devRollbackBlocked = await invokeApp(
+    testApp,
+    'POST',
+    `/api/projects/${saasProjectId}/rollback/${v1Body.deploymentId}`,
+    {
+      headers: { Authorization: `Bearer ${devToken}`, 'X-Org-Id': orgAId },
+    }
+  );
+  assert.strictEqual(devRollbackBlocked.status, 403);
+
+  const idorRollbackBlocked = await invokeApp(
+    testApp,
+    'POST',
+    `/api/projects/${saasProjectId}/rollback/${v1Body.deploymentId}`,
+    {
+      headers: {
+        Authorization: `Bearer ${orgBSession.token}`,
+        'X-Org-Id': orgBSession.defaultOrganization.orgId,
+      },
+    }
+  );
+  assert.strictEqual(idorRollbackBlocked.status, 404);
+
+  const rollbackStart = Date.now();
+  const adminRollbackRes = await invokeApp(
+    testApp,
+    'POST',
+    `/api/projects/${saasProjectId}/rollback/${v1Body.deploymentId}`,
+    {
+      headers: { Authorization: `Bearer ${adminToken}`, 'X-Org-Id': orgAId },
+    }
+  );
+  const rollbackElapsedMs = Date.now() - rollbackStart;
+  assert.strictEqual(adminRollbackRes.status, 200);
+  assert.ok(rollbackElapsedMs < 1_000, `Instant rollback must complete in <10s (took ${rollbackElapsedMs}ms)`);
+  assert.strictEqual(
+    store.getProject(saasProjectId)?.activeProductionDeploymentId,
+    v1Body.deploymentId
+  );
+  assert.strictEqual(store.get(v1Body.deploymentId)?.isProductionActive, true);
+  assert.strictEqual(store.get(v1Body.deploymentId)?.rolledBackFromDeploymentId, v2DepId);
+  assert.strictEqual(store.get(v2DepId)?.isProductionActive, false);
+  console.log(`   ✓ DM-907 (TC-907-01 Webhook HMAC/Replay & TC-907-02 Instant Rollback in ${rollbackElapsedMs}ms) passed.`);
+
+  // ==========================================================================
+  // DM-908 (#8): Ephemeral Pull Request Previews, Single Upsert Comment & Auto-Destroy
+  // ==========================================================================
+  console.log('17. Testing DM-908 (Ephemeral PR #42 Preview URL, Single Upsert PR Bot Comment & Merge Teardown)...');
+
+  const prOpenedPayload = {
+    action: 'opened',
+    number: 42,
+    repository: {
+      full_name: 'acme-cloud/commercial-saas-web',
+      html_url: 'https://github.com/acme-cloud/commercial-saas-web',
+    },
+    pull_request: {
+      number: 42,
+      title: 'feat: add interactive pricing table',
+      user: { login: 'alex-contributor' },
+      head: { ref: 'feat/pr-42', sha: '1111111aaaa2222bbbb' },
+    },
+  };
+  const rawPrOpened = JSON.stringify(prOpenedPayload);
+  const prOpenRes = await invokeApp(testApp, 'POST', '/api/webhooks/github', {
+    rawBody: rawPrOpened,
+    headers: {
+      'X-GitHub-Event': 'pull_request',
+      'X-GitHub-Delivery': 'delivery-pr42-open',
+      'X-Hub-Signature-256': computeGitHubWebhookSignature(rawPrOpened),
+    },
+  });
+  assert.strictEqual(prOpenRes.status, 202);
+  const prOpenData = prOpenRes.json<{
+    deploymentId: string;
+    customHostname: string;
+    inPlaceUpdate: boolean;
+    prCommentId: string;
+  }>();
+  assert.strictEqual(prOpenData.inPlaceUpdate, false);
+  assert.strictEqual(prOpenData.customHostname, 'pr-42-commercial-saas-web.maas-fam.com');
+
+  const settledPrOpen = await waitUntilSettled(prOpenData.deploymentId);
+  assert.strictEqual(settledPrOpen.status, 'LIVE');
+  assert.strictEqual(settledPrOpen.url, 'https://pr-42-commercial-saas-web.maas-fam.com');
+
+  const prCommentAfterOpen = (
+    await invokeApp(testApp, 'GET', '/api/webhooks/pr-comments/acme-cloud/commercial-saas-web/42')
+  ).json<{ comment: { commentId: string; status: string; previewUrl: string; markdownBody: string } }>().comment;
+  assert.strictEqual(prCommentAfterOpen.status, 'LIVE');
+  assert.strictEqual(prCommentAfterOpen.previewUrl, 'https://pr-42-commercial-saas-web.maas-fam.com');
+  assert.ok(prCommentAfterOpen.markdownBody.includes('1111111'));
+
+  // Push new commit to PR #42 (synchronize) -> must update IN-PLACE and edit SAME PR comment ID
+  const prSyncPayload = {
+    ...prOpenedPayload,
+    action: 'synchronize',
+    pull_request: {
+      ...prOpenedPayload.pull_request,
+      head: { ref: 'feat/pr-42', sha: '2222222cccc3333dddd' },
+    },
+  };
+  const rawPrSync = JSON.stringify(prSyncPayload);
+  const prSyncRes = await invokeApp(testApp, 'POST', '/api/webhooks/github', {
+    rawBody: rawPrSync,
+    headers: {
+      'X-GitHub-Event': 'pull_request',
+      'X-GitHub-Delivery': 'delivery-pr42-sync',
+      'X-Hub-Signature-256': computeGitHubWebhookSignature(rawPrSync),
+    },
+  });
+  assert.strictEqual(prSyncRes.status, 202);
+  const prSyncData = prSyncRes.json<{ deploymentId: string; inPlaceUpdate: boolean }>();
+  assert.strictEqual(prSyncData.inPlaceUpdate, true);
+  assert.strictEqual(
+    prSyncData.deploymentId,
+    prOpenData.deploymentId,
+    'Synchronize event must reuse existing PR preview deployment in-place'
+  );
+
+  await waitUntilSettled(prSyncData.deploymentId);
+  const prCommentAfterSync = (
+    await invokeApp(testApp, 'GET', '/api/webhooks/pr-comments/acme-cloud/commercial-saas-web/42')
+  ).json<{ comment: { commentId: string; status: string; markdownBody: string } }>().comment;
+  assert.strictEqual(
+    prCommentAfterSync.commentId,
+    prCommentAfterOpen.commentId,
+    'PR bot must update the single existing comment ID rather than spamming new comments'
+  );
+  assert.strictEqual(prCommentAfterSync.status, 'LIVE');
+  assert.ok(prCommentAfterSync.markdownBody.includes('2222222'));
+
+  // Close/Merge PR #42 -> must automatically tear down preview cloud resources & release Route 53 hostname
+  const prClosedPayload = {
+    ...prOpenedPayload,
+    action: 'closed',
+  };
+  const rawPrClosed = JSON.stringify(prClosedPayload);
+  const prClosedRes = await invokeApp(testApp, 'POST', '/api/webhooks/github', {
+    rawBody: rawPrClosed,
+    headers: {
+      'X-GitHub-Event': 'pull_request',
+      'X-GitHub-Delivery': 'delivery-pr42-closed',
+      'X-Hub-Signature-256': computeGitHubWebhookSignature(rawPrClosed),
+    },
+  });
+  assert.strictEqual(prClosedRes.status, 200);
+  assert.strictEqual(prClosedRes.json<{ cleanedUp: boolean }>().cleanedUp, true);
+  assert.strictEqual(store.get(prOpenData.deploymentId)?.status, 'DELETED');
+  assert.strictEqual(
+    store.isHostnameAvailable('pr-42-commercial-saas-web.maas-fam.com'),
+    true,
+    'Closed PR preview hostname must be released immediately'
+  );
+  console.log('   ✓ DM-908 (TC-908-01 PR Preview Open -> In-Place Sync -> Auto-Destroy & DNS Release) passed.');
+
+  // ==========================================================================
+  // DM-913 (#13): AES-256-GCM Secrets Vault, .env Parser & Audit Log Redaction
+  // ==========================================================================
+  console.log('18. Testing DM-913 (AES-256-GCM Encrypted Secrets, .env Parser & [REDACTED] Audit Log Scrubber)...');
+
+  const rawProdApiKey = 'dm_test_prod_secret_val_99887766';
+  const rawPreviewApiKey = 'dm_test_preview_secret_val_112233';
+  const rawStripeSecret = 'dm_test_billing_secret_val_987654321';
+
+  // DEVELOPER can save preview secrets (201), blocked from production secrets (403)
+  const devPreviewSecRes = await invokeApp(
+    testApp,
+    'POST',
+    `/api/projects/${saasProjectId}/secrets`,
+    {
+      headers: { Authorization: `Bearer ${devToken}`, 'X-Org-Id': orgAId },
+      body: {
+        environment: 'preview',
+        secrets: { OPENAI_API_KEY: rawPreviewApiKey },
+      },
+    }
+  );
+  assert.strictEqual(devPreviewSecRes.status, 201);
+
+  const devProdSecBlocked = await invokeApp(
+    testApp,
+    'POST',
+    `/api/projects/${saasProjectId}/secrets`,
+    {
+      headers: { Authorization: `Bearer ${devToken}`, 'X-Org-Id': orgAId },
+      body: {
+        environment: 'production',
+        secrets: { OPENAI_API_KEY: rawProdApiKey },
+      },
+    }
+  );
+  assert.strictEqual(devProdSecBlocked.status, 403);
+
+  // ADMIN saves production secrets via AES-256-GCM vault
+  const adminProdSecRes = await invokeApp(
+    testApp,
+    'POST',
+    `/api/projects/${saasProjectId}/secrets`,
+    {
+      headers: { Authorization: `Bearer ${adminToken}`, 'X-Org-Id': orgAId },
+      body: {
+        environment: 'production',
+        secrets: {
+          OPENAI_API_KEY: rawProdApiKey,
+          STRIPE_SECRET_KEY: rawStripeSecret,
+        },
+      },
+    }
+  );
+  assert.strictEqual(adminProdSecRes.status, 201);
+
+  // TC-913-01a: GET /api/projects/:id/secrets returns ONLY masked previews — zero plaintext or ciphertext
+  const listSecretsRes = await invokeApp(
+    testApp,
+    'GET',
+    `/api/projects/${saasProjectId}/secrets`,
+    {
+      headers: { Authorization: `Bearer ${devToken}`, 'X-Org-Id': orgAId },
+    }
+  );
+  assert.strictEqual(listSecretsRes.status, 200);
+  assert.strictEqual(listSecretsRes.text.includes(rawProdApiKey), false);
+  assert.strictEqual(listSecretsRes.text.includes(rawPreviewApiKey), false);
+  assert.strictEqual(listSecretsRes.text.includes('ciphertext'), false);
+  assert.ok(listSecretsRes.text.includes('••••'), 'Expected masked preview in GET /secrets');
+
+  // Verify raw database file on disk contains ZERO plaintext secret values
+  const rawDbDiskContent = fs.readFileSync(tmpDbPath, 'utf8');
+  assert.strictEqual(
+    rawDbDiskContent.includes(rawProdApiKey),
+    false,
+    'Plaintext production secret must NEVER be written to disk'
+  );
+  assert.strictEqual(
+    rawDbDiskContent.includes(rawStripeSecret),
+    false,
+    'Plaintext Stripe secret must NEVER be written to disk'
+  );
+
+  // TC-913-01b: Environment isolation + GCM authentication tag tamper rejection
+  const resolvedProd = secretsVault.resolveDecryptedSecretsForDeploy(saasProjectId, 'production', store);
+  const resolvedPreview = secretsVault.resolveDecryptedSecretsForDeploy(saasProjectId, 'preview', store);
+  assert.strictEqual(resolvedProd.OPENAI_API_KEY, rawProdApiKey);
+  assert.strictEqual(resolvedPreview.OPENAI_API_KEY, rawPreviewApiKey);
+
+  const encryptedRecord = store.listEncryptedSecrets(saasProjectId, 'production')[0];
+  const flippedCiphertext =
+    (encryptedRecord.ciphertext[0] === 'A' ? 'B' : 'A') + encryptedRecord.ciphertext.slice(1);
+  assert.throws(
+    () => secretsVault.decryptRecord({ ...encryptedRecord, ciphertext: flippedCiphertext }),
+    /integrity verification failed/i,
+    'Tampered AES-256-GCM ciphertext must throw integrity error'
+  );
+  assert.throws(
+    () => secretsVault.decryptRecord({ ...encryptedRecord, environment: 'preview' }),
+    /integrity verification failed/i,
+    'Cross-environment AAD mismatch must throw integrity error'
+  );
+
+  // DM-913 AC2: 15-line multi-line .env parser + blocked dangerous keys (AWS_*, LD_PRELOAD, NODE_OPTIONS)
+  const sampleDotEnv15Lines = [
+    '# Database & AI Configuration',
+    'DATABASE_URL="postgres://app:pass@db.internal:5432/prod"',
+    '',
+    '# Stripe & Public Keys',
+    'export NEXT_PUBLIC_APP_ENV=production',
+    "REDIS_CACHE_URL='redis://cache.internal:6379'",
+    'WEBHOOK_SIGNING_SECRET=whsec_1234567890abcdef # inline comment stripped',
+    '# Feature Flags',
+    'ENABLE_AI_DIAGNOSTICS=true',
+    'SENTRY_DSN=https://public@sentry.example.com/1',
+    'SMTP_HOST=smtp.postmarkapp.com',
+    'SMTP_PORT=587',
+    'LOG_LEVEL=info',
+    '# End of .env',
+    'APP_VERSION=2.4.0',
+  ].join('\n');
+
+  const parseOkRes = await invokeApp(testApp, 'POST', '/api/secrets/parse-dotenv', {
+    body: { dotEnvText: sampleDotEnv15Lines },
+  });
+  assert.strictEqual(parseOkRes.status, 200);
+  const parsedBody = parseOkRes.json<{
+    count: number;
+    entries: Array<{ key: string; value: string }>;
+  }>();
+  assert.strictEqual(parsedBody.count, 10);
+  assert.strictEqual(
+    parsedBody.entries.find((e) => e.key === 'WEBHOOK_SIGNING_SECRET')?.value,
+    'whsec_1234567890abcdef'
+  );
+
+  for (const blockedEnv of [
+    'AWS_ACCESS_KEY_ID=EXAMPLE_BLOCKED_AWS_KEY',
+    'LD_PRELOAD=/tmp/malicious.so',
+    'NODE_OPTIONS=--require=/tmp/hook.js',
+  ]) {
+    const blockedRes = await invokeApp(testApp, 'POST', '/api/secrets/parse-dotenv', {
+      body: { dotEnvText: blockedEnv },
+    });
+    assert.strictEqual(
+      blockedRes.status,
+      400,
+      `Blocked env line "${blockedEnv}" must be rejected with 400`
+    );
+  }
+
+  // TC-913-02: Audit Log Secret Scrubber — accidental secret printed during build is scrubbed to [REDACTED]
+  const secretDeployRes = await invokeApp(testApp, 'POST', '/api/deploy', {
+    headers: { Authorization: `Bearer ${adminToken}`, 'X-Org-Id': orgAId },
+    body: {
+      repoUrl: 'https://github.com/acme-cloud/commercial-saas-web',
+      projectId: saasProjectId,
+      environment: 'production',
+    },
+  });
+  assert.strictEqual(secretDeployRes.status, 202);
+  const secretDepId = secretDeployRes.json<{ deploymentId: string }>().deploymentId;
+  await waitUntilSettled(secretDepId);
+
+  store.addLog(
+    secretDepId,
+    'BUILDING',
+    'INFO',
+    `Build script echo STRIPE_SECRET_KEY=${rawStripeSecret} and OPENAI=${rawProdApiKey}`
+  );
+
+  const pollSecretDep = await invokeApp(testApp, 'GET', `/api/deploy/${secretDepId}`, {
+    headers: { Authorization: `Bearer ${adminToken}`, 'X-Org-Id': orgAId },
+  });
+  assert.strictEqual(pollSecretDep.status, 200);
+  assert.strictEqual(
+    pollSecretDep.text.includes(rawStripeSecret),
+    false,
+    'TC-913-02 FAILED: Raw Stripe secret leaked in GET /api/deploy/:id auditLogs!'
+  );
+  assert.strictEqual(
+    pollSecretDep.text.includes(rawProdApiKey),
+    false,
+    'TC-913-02 FAILED: Raw OpenAI secret leaked in GET /api/deploy/:id auditLogs!'
+  );
+  assert.ok(
+    pollSecretDep.text.includes(
+      'Build script echo STRIPE_SECRET_KEY=[REDACTED] and OPENAI=[REDACTED]'
+    ),
+    'Expected accidental secret values in auditLogs to be replaced with [REDACTED]'
+  );
+
+  if (fs.existsSync(tmpDbPath)) {
+    fs.unlinkSync(tmpDbPath);
+  }
+
+  console.log('   ✓ DM-913 (TC-913-01 AES-256-GCM + Tamper Check, AC2 .env Parser & TC-913-02 [REDACTED] Log Scrubber) passed.\n');
+  console.log('ALL PHASE 9 · SPRINT 2 TESTS (DM-906, DM-907, DM-908, DM-913) PASSED!');
 }
 
 async function runAllTests(): Promise<void> {
   await runPhase1To3Tests();
   await runPhase9Sprint1Tests();
+  await runPhase9Sprint2Tests();
 }
 
 runAllTests().catch((err) => {

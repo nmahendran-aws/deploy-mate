@@ -82,3 +82,52 @@ CREATE TABLE IF NOT EXISTS reserved_hostnames (
   org_id          VARCHAR(64),
   reserved_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ============================================================================
+-- DeployMate Phase 9 · Sprint 2 (DM-906, DM-907, DM-908, DM-913)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS encrypted_secrets (
+  secret_id          VARCHAR(64) PRIMARY KEY,
+  org_id             VARCHAR(64) NOT NULL REFERENCES organizations(org_id) ON DELETE CASCADE,
+  project_id         VARCHAR(64) NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+  environment        VARCHAR(32) NOT NULL DEFAULT 'production',
+  secret_key         VARCHAR(128) NOT NULL,
+  ciphertext         TEXT NOT NULL,
+  iv                 VARCHAR(64) NOT NULL,
+  auth_tag           VARCHAR(64) NOT NULL,
+  masked_preview     VARCHAR(64) NOT NULL,
+  updated_by_user_id VARCHAR(64),
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (project_id, environment, secret_key)
+);
+
+CREATE TABLE IF NOT EXISTS github_installations (
+  installation_id VARCHAR(64) PRIMARY KEY,
+  org_id          VARCHAR(64) NOT NULL REFERENCES organizations(org_id) ON DELETE CASCADE,
+  account_login   VARCHAR(120) NOT NULL,
+  account_type    VARCHAR(32) NOT NULL DEFAULT 'Organization',
+  repositories    JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  delivery_id  VARCHAR(128) PRIMARY KEY,
+  event_type   VARCHAR(64) NOT NULL,
+  processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS pr_preview_comments (
+  comment_id     VARCHAR(64) PRIMARY KEY,
+  repo_full_name VARCHAR(255) NOT NULL,
+  pr_number      INTEGER NOT NULL,
+  deployment_id  VARCHAR(64) NOT NULL,
+  preview_url    TEXT,
+  status         VARCHAR(32) NOT NULL,
+  markdown_body  TEXT NOT NULL,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (repo_full_name, pr_number)
+);

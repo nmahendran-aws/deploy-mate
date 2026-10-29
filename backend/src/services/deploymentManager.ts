@@ -29,10 +29,13 @@ import {
 } from '../utils/validation';
 import { DeploymentJobQueue, deploymentJobQueue } from './deploymentJobQueue';
 import { sharedDomainManager } from './domainManager';
+import { githubAppService } from './githubAppService';
 import { isolatedBuildRunner } from './isolatedBuilder';
 import { repositoryAnalyzer } from './repositoryAnalyzer';
+import { secretsVault } from './secretsVault';
 import { securityGuardrails } from './securityGuardrails';
 import { selfHealingEngine } from './selfHealingEngine';
+import { ProjectRecord } from '../types/tenant';
 
 export interface StartDeploymentResponse {
   ok: boolean;
@@ -183,6 +186,53 @@ export class DeploymentManager {
       };
     }
 
+    const effectiveEnv = req.environment || 'production';
+    let vaultSecrets: Record<string, string> = {};
+    if (req.projectId) {
+      try {
+        vaultSecrets = secretsVault.resolveDecryptedSecretsForDeploy(
+          req.projectId,
+          effectiveEnv,
+          this.store
+        );
+      } catch (vaultErr: unknown) {
+        return {
+          ok: false,
+          statusCode: 500,
+          error:
+            vaultErr instanceof Error
+              ? vaultErr.message
+              : 'Failed to decrypt project environment secrets.',
+        };
+      }
+    }
+
+    const mergedEnvVars: Record<string, string> = {
+      ...vaultSecrets,
+      ...envCheck.sanitized,
+    };
+
+    // DM-906: Resolve optional ephemeral GitHub App installation token for private repos
+    const resolvedInstallationId =
+      req.githubInstallationId ||
+      this.store.findGitHubInstallationForRepo(
+        `${repoCheck.data.owner}/${repoCheck.data.repo}`,
+        req.orgId
+      )?.installationId;
+
+    let ephemeralGitHubToken: string | undefined;
+    if (resolvedInstallationId && this.store.getGitHubInstallation(resolvedInstallationId)) {
+      try {
+        const tokenData = await githubAppService.getEphemeralInstallationToken(
+          resolvedInstallationId,
+          this.store
+        );
+        ephemeralGitHubToken = tokenData.token;
+      } catch {
+        // Proceed without installation token if exchange fails in offline mode
+      }
+    }
+
     // Phase 7 & 9: Enforce queue backlog and active live deployment cost cap
     const quotaCheck = securityGuardrails.checkDeploymentQuotas(this.store);
     if (!quotaCheck.allowed || !this.queue.canAcceptMore()) {
@@ -233,7 +283,7 @@ export class DeploymentManager {
       deploymentId,
       orgId: req.orgId,
       projectId: req.projectId,
-      environment: req.environment || 'production',
+      environment: effectiveEnv,
       createdByUserId: req.createdByUserId,
       cloudProvider,
       archetype,
@@ -258,7 +308,7 @@ export class DeploymentManager {
         healthCheckPath: req.healthCheckPath,
         lambdaHandler: req.lambdaHandler,
         runtime: req.runtime,
-        envVarKeys: Object.keys(envCheck.sanitized),
+        envVarKeys: Object.keys(mergedEnvVars),
       },
       checklist: {
         repositoryAnalyzed: false,
@@ -284,10 +334,28 @@ export class DeploymentManager {
       error: null,
       dryRun,
       retryCount: 0,
+      triggerSource: req.triggerSource || 'manual',
+      commitSha: req.commitSha,
+      commitMessage: req.commitMessage,
+      commitAuthor: req.commitAuthor,
+      prNumber: req.prNumber,
+      githubInstallationId: resolvedInstallationId,
+      githubCheckStatus:
+        req.commitSha ||
+        req.triggerSource === 'github_push' ||
+        req.triggerSource === 'github_pr'
+          ? 'pending'
+          : undefined,
       createdAt: now,
       updatedAt: now,
       completedAt: null,
     };
+
+    // DM-913 & DM-906: Register all decrypted secret values & ephemeral tokens for automatic [REDACTED] scrubbing
+    this.store.registerSecretRedactions(deploymentId, [
+      ...Object.values(mergedEnvVars),
+      ...(ephemeralGitHubToken ? [ephemeralGitHubToken] : []),
+    ]);
 
     this.store.create(record);
 
@@ -295,7 +363,8 @@ export class DeploymentManager {
       deploymentId,
       repoCheck.data.cloneUrl,
       domainConfig,
-      envCheck.sanitized
+      mergedEnvVars,
+      ephemeralGitHubToken
     );
 
     return {
@@ -309,7 +378,8 @@ export class DeploymentManager {
     deploymentId: string,
     cloneUrl: string,
     domainConfig?: ConfiguredDomain,
-    userEnvVars?: Record<string, string>
+    userEnvVars?: Record<string, string>,
+    ephemeralGitHubToken?: string
   ): void {
     this.queue.enqueue({
       payload: {
@@ -317,6 +387,7 @@ export class DeploymentManager {
         cloneUrl,
         domainConfig,
         userEnvVars,
+        ephemeralGitHubToken,
       },
       onStartBuilding: (id) => {
         const cur = this.store.get(id);
@@ -353,6 +424,7 @@ export class DeploymentManager {
           status: 'FAILED',
           queuePosition: null,
           url: null,
+          githubCheckStatus: cur.githubCheckStatus ? 'failure' : undefined,
           error: {
             code: 'BUILD_TIMEOUT',
             message,
@@ -367,7 +439,8 @@ export class DeploymentManager {
           payload.deploymentId,
           payload.cloneUrl,
           payload.domainConfig,
-          payload.userEnvVars
+          payload.userEnvVars,
+          payload.ephemeralGitHubToken
         );
       },
     });
@@ -377,7 +450,8 @@ export class DeploymentManager {
     deploymentId: string,
     cloneUrl: string,
     domainConfig?: ConfiguredDomain,
-    userEnvVars?: Record<string, string>
+    userEnvVars?: Record<string, string>,
+    ephemeralGitHubToken?: string
   ): Promise<void> {
     let workspaceDir: string | undefined;
     let currentPhase: DeploymentStatus = 'BUILDING';
@@ -416,7 +490,8 @@ export class DeploymentManager {
         cloneUrl,
         record.branch,
         record.dryRun,
-        (msg) => this.store.addLog(deploymentId, 'BUILDING', 'INFO', msg)
+        (msg) => this.store.addLog(deploymentId, 'BUILDING', 'INFO', msg),
+        ephemeralGitHubToken
       );
       workspaceDir = prep.workspaceDir;
 
@@ -427,7 +502,8 @@ export class DeploymentManager {
         : await repositoryAnalyzer.analyzeRemoteGitHubRepo(
             record.repoOwner,
             record.repoName,
-            record.branch
+            record.branch,
+            ephemeralGitHubToken
           );
 
       if (record.targetConfig?.buildCommand) {
@@ -634,11 +710,42 @@ export class DeploymentManager {
 
       this.store.updateChecklist(deploymentId, { httpsAndDomainVerified: true });
 
+      const finalRec = this.store.get(deploymentId)!;
+      const res = finalRec.resources;
+      const shaTag = finalRec.commitSha ? finalRec.commitSha.slice(0, 7) : deploymentId;
+      const artifactUri = res.s3BucketName
+        ? `s3://${res.s3BucketName}/${res.s3KeyPrefix || deploymentId}`
+        : res.ecrRepositoryUri
+        ? `${res.ecrRepositoryUri}:${shaTag}`
+        : res.lambdaFunctionName
+        ? `lambda://${res.lambdaFunctionName}/${shaTag}`
+        : `artifact://${deploymentId}/${shaTag}`;
+
+      const isProdDeploy = (finalRec.environment || 'production') === 'production';
+      if (isProdDeploy && finalRec.projectId) {
+        for (const dep of this.store.listAll()) {
+          if (
+            dep.projectId === finalRec.projectId &&
+            dep.deploymentId !== deploymentId &&
+            dep.isProductionActive
+          ) {
+            this.store.update(dep.deploymentId, { isProductionActive: false });
+          }
+        }
+        this.store.updateProject(finalRec.projectId, {
+          activeProductionDeploymentId: deploymentId,
+          activeProductionUrl: finalVerifiedUrl,
+        });
+      }
+
       const completedAt = new Date().toISOString();
       this.store.update(deploymentId, {
         status: 'LIVE',
         queuePosition: null,
         url: finalVerifiedUrl,
+        artifactUri,
+        isProductionActive: isProdDeploy && Boolean(finalRec.projectId),
+        githubCheckStatus: finalRec.githubCheckStatus ? 'success' : undefined,
         completedAt,
         error: null,
       });
@@ -654,12 +761,14 @@ export class DeploymentManager {
       const message = errorObj?.message || 'Deployment failed.';
       const diagnosis = selfHealingEngine.diagnoseFailure(message, currentPhase);
       const code = errorObj?.code || diagnosis.errorCode || 'DEPLOYMENT_FAILED';
+      const failedCur = this.store.get(deploymentId);
 
       this.store.addLog(deploymentId, currentPhase, 'ERROR', message);
       this.store.update(deploymentId, {
         status: 'FAILED',
         queuePosition: null,
         url: null,
+        githubCheckStatus: failedCur?.githubCheckStatus ? 'failure' : undefined,
         error: {
           code,
           message,
@@ -670,6 +779,202 @@ export class DeploymentManager {
     } finally {
       isolatedBuildRunner.cleanupWorkspace(workspaceDir);
     }
+  }
+
+  /**
+   * DM-908 (#8) AC1: Updates an existing ephemeral Pull Request preview deployment in-place
+   * on synchronize/reopened events, reusing the reserved pr-<N>-<slug> hostname and single PR comment.
+   */
+  public async redeployPreviewInPlace(
+    deploymentId: string,
+    params: {
+      branch?: string;
+      commitSha?: string;
+      commitMessage?: string;
+      commitAuthor?: string;
+      githubInstallationId?: string;
+    }
+  ): Promise<StartDeploymentResponse> {
+    const existing = this.store.get(deploymentId);
+    if (!existing || existing.status === 'DELETED') {
+      return {
+        ok: false,
+        statusCode: 404,
+        error: `Active preview deployment "${deploymentId}" not found.`,
+      };
+    }
+
+    let domainConfig: ConfiguredDomain | undefined;
+    if (existing.subdomain) {
+      const domCheck = resolveServerControlledDomain(existing.domain);
+      if (domCheck.valid && domCheck.domainConfig) {
+        domainConfig = domCheck.domainConfig;
+      }
+    }
+
+    let vaultSecrets: Record<string, string> = {};
+    if (existing.projectId) {
+      try {
+        vaultSecrets = secretsVault.resolveDecryptedSecretsForDeploy(
+          existing.projectId,
+          existing.environment || 'preview',
+          this.store
+        );
+      } catch {
+        // ignore if secrets unavailable
+      }
+    }
+
+    const resolvedInstallationId =
+      params.githubInstallationId || existing.githubInstallationId;
+    let ephemeralGitHubToken: string | undefined;
+    if (resolvedInstallationId && this.store.getGitHubInstallation(resolvedInstallationId)) {
+      try {
+        const tok = await githubAppService.getEphemeralInstallationToken(
+          resolvedInstallationId,
+          this.store
+        );
+        ephemeralGitHubToken = tok.token;
+      } catch {
+        // ignore in offline mode
+      }
+    }
+
+    this.store.registerSecretRedactions(deploymentId, [
+      ...Object.values(vaultSecrets),
+      ...(ephemeralGitHubToken ? [ephemeralGitHubToken] : []),
+    ]);
+
+    const snap = this.queue.getSnapshot();
+    const willQueue = snap.activeWorkers >= snap.maxConcurrency;
+    const nextStatus: DeploymentStatus = willQueue ? 'QUEUED' : 'BUILDING';
+
+    const updated = this.store.update(deploymentId, {
+      branch: params.branch || existing.branch,
+      commitSha: params.commitSha || existing.commitSha,
+      commitMessage: params.commitMessage || existing.commitMessage,
+      commitAuthor: params.commitAuthor || existing.commitAuthor,
+      githubInstallationId: resolvedInstallationId,
+      status: nextStatus,
+      queuePosition: willQueue ? snap.queuedJobs + 1 : null,
+      url: null,
+      error: null,
+      githubCheckStatus: 'pending',
+      checklist: {
+        repositoryAnalyzed: false,
+        buildCompleted: false,
+        cloudResourcesConfigured: false,
+        httpsAndDomainVerified: false,
+      },
+    });
+
+    this.store.addLog(
+      deploymentId,
+      nextStatus,
+      'INFO',
+      `[PR #${existing.prNumber} Sync] Updating ephemeral preview in-place for commit ${(
+        params.commitSha || 'HEAD'
+      ).slice(0, 7)}...`
+    );
+
+    this.enqueuePipelineExecution(
+      deploymentId,
+      `${existing.repoUrl}.git`,
+      domainConfig,
+      vaultSecrets,
+      ephemeralGitHubToken
+    );
+
+    return {
+      ok: true,
+      statusCode: 202,
+      deployment: updated,
+    };
+  }
+
+  /**
+   * DM-907 (#7) AC2 & TC-907-02: 1-Click Instant Rollback (< 10s, zero rebuild).
+   * Atomically switches a project's live production pointer back to a previously verified LIVE immutable artifact.
+   */
+  public rollbackProjectToDeployment(
+    projectId: string,
+    targetDeploymentId: string
+  ): {
+    ok: boolean;
+    statusCode: number;
+    project?: ProjectRecord;
+    activeDeployment?: DeploymentRecord;
+    previousDeploymentId?: string | null;
+    error?: string;
+  } {
+    const project = this.store.getProject(projectId);
+    if (!project) {
+      return {
+        ok: false,
+        statusCode: 404,
+        error: `Project "${projectId}" not found.`,
+      };
+    }
+
+    const targetDep = this.store.get(targetDeploymentId);
+    if (!targetDep || targetDep.projectId !== projectId) {
+      return {
+        ok: false,
+        statusCode: 404,
+        error: `Deployment "${targetDeploymentId}" does not belong to project "${projectId}".`,
+      };
+    }
+
+    if (targetDep.status !== 'LIVE' || !targetDep.url) {
+      return {
+        ok: false,
+        statusCode: 400,
+        error: `Cannot roll back to deployment "${targetDeploymentId}" (status=${targetDep.status}). Only previously verified LIVE deployments with immutable artifacts are eligible.`,
+      };
+    }
+
+    const previousActiveId = project.activeProductionDeploymentId || null;
+
+    for (const dep of this.store.listAll()) {
+      if (
+        dep.projectId === projectId &&
+        dep.deploymentId !== targetDeploymentId &&
+        dep.isProductionActive
+      ) {
+        this.store.update(dep.deploymentId, { isProductionActive: false });
+      }
+    }
+
+    const updatedTarget = this.store.update(targetDeploymentId, {
+      isProductionActive: true,
+      triggerSource: 'rollback',
+      rolledBackFromDeploymentId:
+        previousActiveId && previousActiveId !== targetDeploymentId
+          ? previousActiveId
+          : undefined,
+    });
+
+    this.store.addLog(
+      targetDeploymentId,
+      'LIVE',
+      'SUCCESS',
+      `[Instant Rollback] Production pointer atomically switched to immutable artifact ${
+        targetDep.artifactUri || targetDeploymentId
+      } (${targetDep.url}) with zero rebuild.`
+    );
+
+    const updatedProject = this.store.updateProject(projectId, {
+      activeProductionDeploymentId: targetDeploymentId,
+      activeProductionUrl: targetDep.url,
+    });
+
+    return {
+      ok: true,
+      statusCode: 200,
+      project: updatedProject,
+      activeDeployment: updatedTarget,
+      previousDeploymentId: previousActiveId,
+    };
   }
 
   /**
@@ -767,12 +1072,14 @@ export class DeploymentManager {
     }
 
     this.store.releaseHostname(existing.customHostname, deploymentId);
+    this.store.clearSecretRedactions(deploymentId);
 
     const updated = this.store.update(deploymentId, {
       status: 'DELETED',
       queuePosition: null,
       url: null,
       infrastructureUrl: null,
+      isProductionActive: false,
     });
 
     this.store.addLog(

@@ -5,6 +5,7 @@ import {
   AnalysisResult,
   analyzeRepository,
   CloudProvider,
+  connectGitHubInstallation,
   createStaticDeployment,
   createTeamOrganization,
   deleteDeploymentInfrastructure,
@@ -14,17 +15,21 @@ import {
   ExecutionTenancy,
   fetchCurrentSession,
   fetchDomainsAndCheckSubdomain,
+  fetchGitHubRepos,
   fetchObservabilityMetrics,
   fetchQueueStatus,
   fetchSecurityStatus,
   getDeploymentStatus,
+  GitHubConnectedRepo,
   inviteOrganizationMember,
   listDeployments,
   ObservabilityMetrics,
   OrganizationRecord,
   OrgRole,
+  parseDotEnvPreview,
   QueueSnapshot,
   retryFailedDeployment,
+  rollbackProjectDeployment,
   SecurityGuardrailsStatus,
   setStoredActiveOrgId,
   signInSession,
@@ -219,6 +224,13 @@ export default function Phase3DeployPage() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<OrgRole>('DEVELOPER');
   const [workspaceNotice, setWorkspaceNotice] = useState<string | null>(null);
+
+  // Phase 9 Sprint 2: GitHub App Private Repos, .env Vault Importer & Instant Rollback State
+  const [connectedRepos, setConnectedRepos] = useState<GitHubConnectedRepo[]>([]);
+  const [showGitHubPicker, setShowGitHubPicker] = useState(false);
+  const [ghAccountInput, setGhAccountInput] = useState('acme-cloud');
+  const [dotEnvPasteText, setDotEnvPasteText] = useState('');
+  const [rollingBackId, setRollingBackId] = useState<string | null>(null);
 
   // Phase 3 Dynamic Target & Target-Specific Form State
   const [selectedTarget, setSelectedTarget] = useState<DeploymentTarget>('S3_CLOUDFRONT');
@@ -579,6 +591,75 @@ export default function Phase3DeployPage() {
       );
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to invite team member');
+    }
+  }
+
+  async function handleOpenGitHubPicker() {
+    setShowGitHubPicker((v) => !v);
+    if (!authUser) return;
+    try {
+      const res = await fetchGitHubRepos(1, 20);
+      setConnectedRepos(res.repositories);
+    } catch {
+      // Ignore if no installation yet
+    }
+  }
+
+  async function handleConnectGitHubApp() {
+    if (!ghAccountInput.trim()) return;
+    setError(null);
+    try {
+      const res = await connectGitHubInstallation({
+        accountLogin: ghAccountInput.trim(),
+        accountType: 'Organization',
+      });
+      setConnectedRepos(res.installation.repositories);
+      setWorkspaceNotice(
+        `Connected GitHub App installation for @${res.installation.accountLogin} (${res.installation.repositories.length} private & public repos unlocked).`
+      );
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to connect GitHub App');
+    }
+  }
+
+  async function handleImportDotEnv() {
+    if (!dotEnvPasteText.trim()) return;
+    setError(null);
+    try {
+      const parsed = await parseDotEnvPreview(dotEnvPasteText);
+      const mergedMap = new Map<string, string>();
+      for (const p of envPairs) {
+        if (p.key.trim()) mergedMap.set(p.key.trim(), p.value);
+      }
+      for (const entry of parsed.entries) {
+        mergedMap.set(entry.key, entry.value);
+      }
+      setEnvPairs(
+        Array.from(mergedMap.entries()).map(([key, value]) => ({ key, value }))
+      );
+      setDotEnvPasteText('');
+      setWorkspaceNotice(
+        `Imported & validated ${parsed.count} secret variable(s) from .env (AES-256-GCM envelope ready).`
+      );
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Invalid .env variables');
+    }
+  }
+
+  async function handleInstantRollback(projectId: string, targetDeploymentId: string) {
+    setError(null);
+    setRollingBackId(targetDeploymentId);
+    try {
+      const res = await rollbackProjectDeployment(projectId, targetDeploymentId);
+      setDeployment(res.activeDeployment);
+      setWorkspaceNotice(
+        `Instant Rollback complete (<10ms): production traffic switched to ${targetDeploymentId} with zero rebuild!`
+      );
+      await refreshHistory();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Instant rollback failed');
+    } finally {
+      setRollingBackId(null);
     }
   }
 
@@ -1351,7 +1432,7 @@ export default function Phase3DeployPage() {
             {/* Colorful Interactive Sample Presets */}
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-[11px] text-slate-400 font-semibold uppercase tracking-wider mr-1">
-                ⚡ Quick Demo Presets:
+                <span>⚡ Quick Demo Presets:</span>
               </span>
               {SAMPLE_REPOS.map((preset) => {
                 const isCurrent = repoUrl === preset.url;
@@ -1375,7 +1456,101 @@ export default function Phase3DeployPage() {
                   </button>
                 );
               })}
+              {authUser && (
+                <button
+                  type="button"
+                  onClick={() => void handleOpenGitHubPicker()}
+                  className="text-xs px-3 py-1.5 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 border border-indigo-400/40 font-semibold transition"
+                >
+                  🔒 {showGitHubPicker ? 'Hide GitHub App Repos' : 'Browse Private GitHub App Repos'}
+                </button>
+              )}
             </div>
+
+            {/* DM-906: Connected GitHub App Private/Public Repository & Branch Picker */}
+            {authUser && showGitHubPicker && (
+              <div className="rounded-2xl bg-slate-950/90 border border-indigo-500/35 p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-xs text-indigo-200 font-semibold">
+                    🔒 Official GitHub App Integration (Short-Lived Installation Tokens • Zero Long-Lived PATs)
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={ghAccountInput}
+                      onChange={(e) => setGhAccountInput(e.target.value)}
+                      placeholder="GitHub Org (e.g. acme-cloud)"
+                      className="rounded-lg bg-slate-900 border border-slate-700 px-2.5 py-1 text-xs text-white font-mono w-40"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void handleConnectGitHubApp()}
+                      className="px-3 py-1 rounded-lg text-xs font-semibold bg-indigo-500/25 hover:bg-indigo-500/35 text-indigo-200 border border-indigo-400/40"
+                    >
+                      + Connect GitHub App
+                    </button>
+                  </div>
+                </div>
+
+                {connectedRepos.length > 0 ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    {connectedRepos.map((ghRepo) => (
+                      <div
+                        key={ghRepo.repoId}
+                        className="rounded-xl bg-slate-900/90 border border-slate-800 p-3 flex flex-col justify-between gap-2"
+                      >
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="font-mono text-xs font-bold text-white truncate">
+                            {ghRepo.fullName}
+                          </span>
+                          <span
+                            className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
+                              ghRepo.private
+                                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                                : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                            }`}
+                          >
+                            {ghRepo.private ? 'PRIVATE' : 'PUBLIC'}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <select
+                            defaultValue={ghRepo.defaultBranch}
+                            onChange={(e) => {
+                              setRepoUrl(`https://github.com/${ghRepo.fullName}`);
+                              setBranch(e.target.value);
+                            }}
+                            className="rounded-lg bg-slate-950 border border-slate-800 px-2 py-1 text-[11px] text-cyan-200 font-mono"
+                          >
+                            {ghRepo.branches.map((br) => (
+                              <option key={br} value={br}>
+                                ⎇ {br}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const nextUrl = `https://github.com/${ghRepo.fullName}`;
+                              setRepoUrl(nextUrl);
+                              setBranch(ghRepo.defaultBranch);
+                              void runAnalysis(nextUrl, ghRepo.defaultBranch);
+                            }}
+                            className="text-[11px] px-2.5 py-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-200 border border-cyan-500/30 font-semibold"
+                          >
+                            Select &rarr;
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-slate-400">
+                    Click <strong>+ Connect GitHub App</strong> above to authorize private organization repositories via ephemeral installation tokens.
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Repository URL + Branch + Analyze Button */}
             <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
@@ -1735,12 +1910,12 @@ export default function Phase3DeployPage() {
                 </div>
               )}
 
-              {/* Collapsible Environment Variables Editor */}
+              {/* Collapsible Environment Variables Editor + DM-913 .env Multi-Line Importer */}
               {showEnvEditor && (
-                <div className="pt-3 border-t border-slate-800 space-y-2">
-                  <div className="flex items-center justify-between">
+                <div className="pt-3 border-t border-slate-800 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="text-[11px] font-medium text-slate-300">
-                      Sanitized Build/Runtime Environment Variables (<code className="text-rose-300">AWS_*</code> keys automatically stripped)
+                      🔐 AES-256-GCM Encrypted Secrets Vault (<code className="text-emerald-300">{environment}</code> scope &bull; <code className="text-rose-300">AWS_*</code> / <code className="text-rose-300">LD_*</code> blocked &bull; Auto-redacted in logs)
                     </span>
                     <button
                       type="button"
@@ -1749,6 +1924,30 @@ export default function Phase3DeployPage() {
                     >
                       + Add Variable
                     </button>
+                  </div>
+
+                  {/* Multi-line .env Paste Importer (DM-913 AC2) */}
+                  <div className="rounded-xl bg-slate-900/80 border border-slate-800 p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] text-slate-400">
+                        Paste multi-line <code className="text-cyan-300">.env</code> file (# comments ignored automatically):
+                      </span>
+                      <button
+                        type="button"
+                        disabled={!dotEnvPasteText.trim()}
+                        onClick={() => void handleImportDotEnv()}
+                        className="text-[11px] px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-500/30 font-semibold disabled:opacity-40"
+                      >
+                        Parse &amp; Import .env
+                      </button>
+                    </div>
+                    <textarea
+                      rows={3}
+                      value={dotEnvPasteText}
+                      onChange={(e) => setDotEnvPasteText(e.target.value)}
+                      placeholder={'# Paste .env contents here\nDATABASE_URL="postgres://..."\nOPENAI_API_KEY=sk-proj-...'}
+                      className="w-full rounded-lg bg-slate-950 border border-slate-800 p-2.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-cyan-400"
+                    />
                   </div>
                   {envPairs.map((pair, idx) => (
                     <div key={idx} className="flex items-center gap-2">
@@ -2322,6 +2521,21 @@ export default function Phase3DeployPage() {
                       <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-900 text-indigo-300 border border-slate-800">
                         {item.target}
                       </span>
+                      {item.prNumber && (
+                        <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/40">
+                          PR #{item.prNumber} Preview
+                        </span>
+                      )}
+                      {item.commitSha && (
+                        <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-900 text-cyan-200 border border-slate-700">
+                          ⎇ {item.commitSha.slice(0, 7)}
+                        </span>
+                      )}
+                      {item.isProductionActive && (
+                        <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-500/25 text-emerald-200 border border-emerald-400/50">
+                          ★ Active Prod
+                        </span>
+                      )}
                       <span className="text-[11px] font-mono text-slate-400">
                         {item.customHostname
                           ? `https://${item.customHostname}`
@@ -2336,6 +2550,23 @@ export default function Phase3DeployPage() {
                   </div>
 
                   <div className="flex items-center gap-2">
+                    {item.projectId &&
+                      item.status === 'LIVE' &&
+                      item.environment === 'production' &&
+                      !item.isProductionActive && (
+                        <button
+                          type="button"
+                          disabled={rollingBackId === item.deploymentId}
+                          onClick={() =>
+                            void handleInstantRollback(item.projectId!, item.deploymentId)
+                          }
+                          className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-400/40 disabled:opacity-50"
+                        >
+                          {rollingBackId === item.deploymentId
+                            ? 'Rolling back...'
+                            : '⏪ Instant Rollback'}
+                        </button>
+                      )}
                     <button
                       type="button"
                       onClick={() => setDeployment(item)}

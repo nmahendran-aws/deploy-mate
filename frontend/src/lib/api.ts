@@ -89,20 +89,43 @@ export interface ProjectRecord {
   slug: string;
   repoUrl: string;
   defaultBranch: string;
-  defaultProvider: CloudProvider;
+  cloudProvider?: CloudProvider;
+  defaultProvider?: CloudProvider;
   defaultArchetype: WorkloadArchetype;
   defaultTenancy: ExecutionTenancy;
   environments: EnvironmentType[];
+  activeProductionDeploymentId?: string;
+  activeProductionUrl?: string | null;
   createdAt: string;
+}
+
+export interface GitHubConnectedRepo {
+  repoId: string;
+  owner: string;
+  name: string;
+  fullName: string;
+  private: boolean;
+  defaultBranch: string;
+  branches: string[];
+  cloneUrl: string;
+}
+
+export interface MaskedSecretSummary {
+  secretId: string;
+  projectId: string;
+  environment: EnvironmentType;
+  key: string;
+  maskedPreview: string;
+  updatedAt: string;
 }
 
 export interface QueueSnapshot {
   maxConcurrency: number;
-  maxQueueBacklog: number;
+  maxQueueBacklog?: number;
   jobTimeoutMs: number;
   activeWorkers: number;
   queuedJobs: number;
-  activeDeploymentIds: string[];
+  activeDeploymentIds?: string[];
   queuedDeploymentIds: string[];
 }
 
@@ -220,6 +243,16 @@ export interface DeploymentRecord {
     remediation?: string;
   } | null;
   dryRun: boolean;
+  triggerSource?: 'manual' | 'github_push' | 'github_pr' | 'rollback';
+  commitSha?: string;
+  commitMessage?: string;
+  commitAuthor?: string;
+  artifactUri?: string;
+  prNumber?: number;
+  prCommentId?: string;
+  rolledBackFromDeploymentId?: string;
+  isProductionActive?: boolean;
+  githubCheckStatus?: 'pending' | 'success' | 'failure';
   createdAt: string;
   updatedAt: string;
   completedAt?: string | null;
@@ -523,7 +556,10 @@ export async function createStaticDeployment(payload: {
       tenancy: payload.tenancy || 'DEPLOYMATE_MANAGED',
       environment: payload.environment || 'production',
       projectId: payload.projectId,
-      target: payload.cloudProvider && payload.cloudProvider !== 'AWS' ? undefined : payload.target || 'S3_CLOUDFRONT',
+      target:
+        payload.cloudProvider && payload.cloudProvider !== 'AWS'
+          ? undefined
+          : payload.target || 'S3_CLOUDFRONT',
       deploymentType: payload.deploymentType || 'static',
       branch: payload.branch,
       subdomain: payload.subdomain,
@@ -694,6 +730,110 @@ export async function retryFailedDeployment(deploymentId: string): Promise<{
   const data = await res.json();
   if (!res.ok) {
     throw new Error(data.error || 'Failed to retry deployment');
+  }
+  return data;
+}
+
+/**
+ * POST /api/github/installations (DM-906)
+ */
+export async function connectGitHubInstallation(params: {
+  accountLogin: string;
+  accountType?: 'User' | 'Organization';
+}): Promise<{
+  installation: {
+    installationId: string;
+    accountLogin: string;
+    repositories: GitHubConnectedRepo[];
+  };
+}> {
+  const res = await fetch(`${API_BASE}/github/installations`, {
+    method: 'POST',
+    headers: buildHeaders(true),
+    credentials: 'include',
+    body: JSON.stringify(params),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Failed to connect GitHub App installation');
+  }
+  return data;
+}
+
+/**
+ * GET /api/github/repos (DM-906)
+ */
+export async function fetchGitHubRepos(
+  page = 1,
+  perPage = 20
+): Promise<{
+  repositories: GitHubConnectedRepo[];
+  page: number;
+  perPage: number;
+  totalCount: number;
+  totalPages: number;
+  installationsCount: number;
+}> {
+  const res = await fetch(
+    `${API_BASE}/github/repos?page=${page}&perPage=${perPage}`,
+    {
+      headers: buildHeaders(),
+      credentials: 'include',
+    }
+  );
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Failed to load GitHub App repositories');
+  }
+  return data;
+}
+
+/**
+ * POST /api/secrets/parse-dotenv (DM-913 AC2)
+ */
+export async function parseDotEnvPreview(dotEnvText: string): Promise<{
+  valid: boolean;
+  count: number;
+  entries: Array<{ key: string; value: string; maskedPreview: string }>;
+}> {
+  const res = await fetch(`${API_BASE}/secrets/parse-dotenv`, {
+    method: 'POST',
+    headers: buildHeaders(true),
+    credentials: 'include',
+    body: JSON.stringify({ dotEnvText }),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Failed to parse .env content');
+  }
+  return data;
+}
+
+/**
+ * POST /api/projects/:projectId/rollback/:deploymentId (DM-907 AC2)
+ */
+export async function rollbackProjectDeployment(
+  projectId: string,
+  deploymentId: string
+): Promise<{
+  ok: boolean;
+  project: ProjectRecord;
+  activeDeployment: DeploymentRecord;
+  previousDeploymentId: string | null;
+}> {
+  const res = await fetch(
+    `${API_BASE}/projects/${encodeURIComponent(
+      projectId
+    )}/rollback/${encodeURIComponent(deploymentId)}`,
+    {
+      method: 'POST',
+      headers: buildHeaders(),
+      credentials: 'include',
+    }
+  );
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Failed to execute instant rollback');
   }
   return data;
 }

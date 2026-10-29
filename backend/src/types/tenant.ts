@@ -59,8 +59,67 @@ export interface ProjectRecord {
   cloudProvider: CloudProvider;
   defaultArchetype?: WorkloadArchetype;
   defaultTenancy?: ExecutionTenancy;
+  activeProductionDeploymentId?: string | null;
+  activeProductionUrl?: string | null;
   environments: EnvironmentType[];
   createdByUserId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * DM-913 (#13): AES-256-GCM Encrypted Environment Variable / Secret Record
+ */
+export interface EncryptedSecretRecord {
+  secretId: string;
+  orgId: string;
+  projectId: string;
+  environment: EnvironmentType;
+  key: string;
+  ciphertext: string;
+  iv: string;
+  authTag: string;
+  maskedPreview: string;
+  updatedByUserId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * DM-906 (#6): GitHub App Installation & Connected Repository Metadata
+ */
+export interface GitHubConnectedRepo {
+  repoId: string;
+  owner: string;
+  name: string;
+  fullName: string;
+  private: boolean;
+  defaultBranch: string;
+  branches: string[];
+  cloneUrl: string;
+}
+
+export interface GitHubInstallationRecord {
+  installationId: string;
+  orgId: string;
+  accountLogin: string;
+  accountType: 'User' | 'Organization';
+  repositories: GitHubConnectedRepo[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * DM-908 (#8): Single Upserted Pull Request Preview Comment Record
+ */
+export interface PrPreviewCommentRecord {
+  commentId: string;
+  repoFullName: string;
+  prNumber: number;
+  deploymentId: string;
+  previewUrl: string | null;
+  status: string;
+  markdownBody: string;
   createdAt: string;
   updatedAt: string;
 }

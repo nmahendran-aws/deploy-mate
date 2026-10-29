@@ -3,6 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { AnalysisResult } from '../types/deployment';
+import { githubAppService } from './githubAppService';
 
 export interface IsolatedBuildResult {
   workspaceDir: string;
@@ -42,6 +43,22 @@ export class IsolatedBuildRunner {
     const extraPaths = repoDir
       ? `${path.join(repoDir, 'node_modules', '.bin')}:${path.join(repoDir, 'frontend', 'node_modules', '.bin')}:`
       : '';
+
+    const safeUserVars: Record<string, string> = {};
+    for (const [k, v] of Object.entries(userEnvVars)) {
+      const upper = k.toUpperCase();
+      if (
+        upper.startsWith('AWS_') ||
+        upper.startsWith('GITHUB_') ||
+        upper === 'PATH' ||
+        upper.startsWith('LD_') ||
+        upper.startsWith('DYLD_')
+      ) {
+        continue;
+      }
+      safeUserVars[k] = v;
+    }
+
     return {
       PATH: `${extraPaths}${nodeBinDir}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin`,
       HOME: this.buildRoot,
@@ -49,21 +66,22 @@ export class IsolatedBuildRunner {
       NODE_ENV: 'production',
       NPM_CONFIG_AUDIT: 'false',
       NPM_CONFIG_FUND: 'false',
-      ...userEnvVars,
+      ...safeUserVars,
     };
   }
 
   /**
    * Downloads and extracts the GitHub repository into an isolated workspace directory.
-   * Uses GitHub's HTTPS tarball archive + /usr/bin/tar so it works even on macOS systems
-   * where /usr/bin/git is blocked by an unaccepted Xcode license.
+   * Supports ephemeral GitHub App installation tokens for private repositories (DM-906)
+   * and immediately scrubs any token material from .git/config before build execution.
    */
   public async prepareWorkspace(
     deploymentId: string,
     cloneUrl: string,
     branch?: string,
     dryRun: boolean = true,
-    onLog?: (msg: string) => void
+    onLog?: (msg: string) => void,
+    ephemeralGitHubToken?: string
   ): Promise<{ workspaceDir: string; repoDir: string; clonedFromRemote: boolean }> {
     const workspaceDir = path.join(this.buildRoot, deploymentId);
     const repoDir = path.join(workspaceDir, 'repo');
@@ -87,19 +105,23 @@ export class IsolatedBuildRunner {
       const tarballUrl = `https://codeload.github.com/${owner}/${repo}/tar.gz/${ref}`;
       const archivePath = path.join(workspaceDir, 'repo.tar.gz');
 
-      onLog?.(`Downloading repository archive from ${tarballUrl} into isolated workspace...`);
+      const authToken = ephemeralGitHubToken || process.env.GITHUB_ACCESS_TOKEN;
+
+      onLog?.(
+        `Downloading repository archive from ${tarballUrl} into isolated workspace${
+          ephemeralGitHubToken ? ' (via ephemeral GitHub App installation token)' : ''
+        }...`
+      );
       const res = await fetch(tarballUrl, {
         headers: {
           'User-Agent': 'Repo2Cloud-IsolatedBuilder/1.0',
-          ...(process.env.GITHUB_ACCESS_TOKEN
-            ? { Authorization: `Bearer ${process.env.GITHUB_ACCESS_TOKEN}` }
-            : {}),
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
         },
       });
 
       if (!res.ok) {
         throw new Error(
-          `Failed to download repository archive from GitHub (HTTP ${res.status} ${res.statusText}). Ensure the repository is public.`
+          `Failed to download repository archive from GitHub (HTTP ${res.status} ${res.statusText}). Ensure the repository is accessible.`
         );
       }
 
@@ -131,10 +153,12 @@ export class IsolatedBuildRunner {
         );
       }
 
+      // DM-906 AC2: Scrub any embedded GitHub installation token from .git/config immediately
+      githubAppService.scrubGitConfigCredentials(repoDir);
       this.verifyWorkspaceSafety(repoDir);
 
       onLog?.(
-        'Repository archive downloaded, extracted, and verified against symlink escape and quota limits.'
+        'Repository archive downloaded, extracted, .git/config scrubbed, and verified against symlink escape.'
       );
       return { workspaceDir, repoDir, clonedFromRemote: true };
     }
@@ -167,6 +191,9 @@ export class IsolatedBuildRunner {
       buildLogs.push(msg);
       params.onLog?.(msg);
     };
+
+    // DM-906 AC2: Always scrub .git/config credentials inside repoDir prior to any build command execution
+    githubAppService.scrubGitConfigCredentials(params.repoDir);
 
     const sanitizedEnv = this.createSanitizedWorkerEnv(params.userEnvVars, params.repoDir);
     const nodeExec = process.execPath;
@@ -207,15 +234,36 @@ export class IsolatedBuildRunner {
           throw new Error(`Isolated Docker build failed: ${res.stderr || res.stdout}`);
         }
       } else if (params.analysis.buildCommand) {
-        log('Installing dependencies in isolated worker with "--ignore-scripts" protection...');
-        const installRes = await this.runSandboxedCommand(
-          nodeExec,
-          [npmCli, 'install', '--ignore-scripts', '--no-audit', '--no-fund'],
-          params.repoDir,
-          sanitizedEnv
-        );
-        if (installRes.exitCode !== 0) {
-          throw new Error(`Dependency installation failed: ${installRes.stderr || installRes.stdout}`);
+        let needsNpmInstall = true;
+        const pkgPath = path.join(params.repoDir, 'package.json');
+        if (fs.existsSync(pkgPath)) {
+          try {
+            const parsedPkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as {
+              dependencies?: Record<string, string>;
+              devDependencies?: Record<string, string>;
+            };
+            const depCount =
+              Object.keys(parsedPkg.dependencies || {}).length +
+              Object.keys(parsedPkg.devDependencies || {}).length;
+            if (depCount === 0 || fs.existsSync(path.join(params.repoDir, 'node_modules'))) {
+              needsNpmInstall = false;
+            }
+          } catch {
+            // proceed with npm install
+          }
+        }
+
+        if (needsNpmInstall) {
+          log('Installing dependencies in isolated worker with "--ignore-scripts" protection...');
+          const installRes = await this.runSandboxedCommand(
+            nodeExec,
+            [npmCli, 'install', '--ignore-scripts', '--no-audit', '--no-fund'],
+            params.repoDir,
+            sanitizedEnv
+          );
+          if (installRes.exitCode !== 0) {
+            throw new Error(`Dependency installation failed: ${installRes.stderr || installRes.stdout}`);
+          }
         }
 
         log(`Executing build command: ${params.analysis.buildCommand}`);

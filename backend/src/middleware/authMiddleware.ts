@@ -51,7 +51,11 @@ export function createAuthMiddlewares(store: DeploymentStore = deploymentStore) 
     const rawToken = extractBearerToken(req);
 
     if (!rawToken) {
-      if (process.env.REQUIRE_AUTH === 'true' && req.method !== 'GET') {
+      const isPublicEndpoint =
+        req.path === '/webhooks/github' ||
+        req.path === '/auth/session' ||
+        req.path === '/auth/logout';
+      if (process.env.REQUIRE_AUTH === 'true' && req.method !== 'GET' && !isPublicEndpoint) {
         return res.status(401).json({
           error: 'Authentication required. Please sign in to DeployMate.',
           code: 'UNAUTHORIZED',

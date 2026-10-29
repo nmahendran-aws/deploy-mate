@@ -230,6 +230,18 @@ export interface DeploymentRecord {
   };
   dryRun: boolean;
   retryCount: number;
+  /** DM-907 & DM-908: Git CI/CD metadata, immutable artifact URI, rollback & PR preview tracking */
+  triggerSource?: 'manual' | 'github_push' | 'github_pr' | 'rollback';
+  commitSha?: string;
+  commitMessage?: string;
+  commitAuthor?: string;
+  artifactUri?: string;
+  prNumber?: number;
+  prCommentId?: string;
+  rolledBackFromDeploymentId?: string;
+  isProductionActive?: boolean;
+  githubCheckStatus?: 'pending' | 'success' | 'failure';
+  githubInstallationId?: string;
   createdAt: string;
   updatedAt: string;
   completedAt?: string | null;
@@ -244,6 +256,12 @@ export interface CreateDeploymentRequest {
   projectId?: string;
   environment?: EnvironmentType;
   createdByUserId?: string;
+  triggerSource?: 'manual' | 'github_push' | 'github_pr' | 'rollback';
+  commitSha?: string;
+  commitMessage?: string;
+  commitAuthor?: string;
+  prNumber?: number;
+  githubInstallationId?: string;
   deploymentType?: DeploymentTypeInput;
   target?: DeploymentTarget;
   subdomain?: string;

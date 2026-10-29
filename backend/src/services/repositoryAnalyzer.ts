@@ -43,10 +43,16 @@ export class RepositoryAnalyzer {
   public async analyzeRemoteGitHubRepo(
     owner: string,
     repo: string,
-    branch?: string
+    branch?: string,
+    ephemeralGitHubToken?: string
   ): Promise<AnalysisResult> {
     try {
-      const snapshot = await this.fetchRemoteSnapshot(owner, repo, branch);
+      const snapshot = await this.fetchRemoteSnapshot(
+        owner,
+        repo,
+        branch,
+        ephemeralGitHubToken
+      );
       if (snapshot.files.length > 0 || snapshot.packageJson) {
         return this.evaluateSnapshot(snapshot);
       }
@@ -621,7 +627,8 @@ export class RepositoryAnalyzer {
   private async fetchRemoteSnapshot(
     owner: string,
     repo: string,
-    branch?: string
+    branch?: string,
+    ephemeralGitHubToken?: string
   ): Promise<RepoInspectionSnapshot> {
     if (process.env.FORCE_DRY_RUN_TEST !== 'true') {
       dotenv.config({ path: path.resolve(__dirname, '../../../.env'), override: true });
@@ -631,8 +638,9 @@ export class RepositoryAnalyzer {
       Accept: 'application/vnd.github.v3+json',
       'User-Agent': 'Repo2Cloud-Analyzer/1.0',
     };
-    if (process.env.GITHUB_ACCESS_TOKEN) {
-      headers.Authorization = `Bearer ${process.env.GITHUB_ACCESS_TOKEN}`;
+    const token = ephemeralGitHubToken || process.env.GITHUB_ACCESS_TOKEN;
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
     }
 
     const refQuery = branch ? `?ref=${encodeURIComponent(branch)}` : '';
