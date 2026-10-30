@@ -666,7 +666,10 @@ export class RepositoryAnalyzer {
       const fetchFileText = async (fileName: string): Promise<string | undefined> => {
         const found = items.find((i) => i.name.toLowerCase() === fileName.toLowerCase());
         if (!found || !found.download_url) return undefined;
-        const fileRes = await fetch(found.download_url, { signal: controller.signal });
+        const fileRes = await fetch(found.download_url, {
+          headers: token ? { Authorization: `Bearer ${token}`, 'User-Agent': 'Repo2Cloud-Analyzer/1.0' } : undefined,
+          signal: controller.signal,
+        });
         if (!fileRes.ok) return undefined;
         return await fileRes.text();
       };

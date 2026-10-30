@@ -92,42 +92,68 @@ export function createGitHubAndSecretsRouter(
   // DM-906: Official GitHub App Installation & Private Repository Picker API
   // ==========================================================================
 
-  router.post('/github/installations', requireAuth, (req: Request, res: Response) => {
-    const auth = req.auth!;
-    if (!auth.activeOrgId || !auth.activeRole) {
-      return res.status(404).json({ error: 'Organization not found.' });
-    }
+  router.post(
+    '/github/installations',
+    requireAuth,
+    async (req: Request, res: Response) => {
+      const auth = req.auth!;
+      if (!auth.activeOrgId || !auth.activeRole) {
+        return res.status(404).json({ error: 'Organization not found.' });
+      }
 
-    const perm = authService.evaluatePermission(auth.activeRole, 'MANAGE_MEMBERS');
-    if (!perm.allowed) {
-      return res.status(403).json({
-        error:
-          perm.reason ||
-          'Forbidden: ADMIN or OWNER role is required to connect a GitHub App installation.',
-        code: 'FORBIDDEN_RBAC',
-      });
-    }
+      const perm = authService.evaluatePermission(auth.activeRole, 'MANAGE_MEMBERS');
+      if (!perm.allowed) {
+        return res.status(403).json({
+          error:
+            perm.reason ||
+            'Forbidden: ADMIN or OWNER role is required to connect a GitHub App installation.',
+          code: 'FORBIDDEN_RBAC',
+        });
+      }
 
-    const { installationId, accountLogin, accountType, repositories } = req.body || {};
-    if (typeof accountLogin !== 'string' || !accountLogin.trim()) {
-      return res.status(400).json({
-        error: 'GitHub accountLogin (organization or username) is required.',
-      });
-    }
-
-    const installation = githubAppService.connectInstallation(
-      {
-        orgId: auth.activeOrgId,
-        installationId: typeof installationId === 'string' ? installationId : undefined,
+      const {
+        installationId,
         accountLogin,
-        accountType: accountType === 'User' ? 'User' : 'Organization',
-        repositories: Array.isArray(repositories) ? repositories : undefined,
-      },
-      store
-    );
+        accountType,
+        accessToken,
+        repositories,
+      } = req.body || {};
+      if (typeof accountLogin !== 'string' || !accountLogin.trim()) {
+        return res.status(400).json({
+          error: 'GitHub accountLogin (organization or username) is required.',
+        });
+      }
 
-    return res.status(201).json({ installation });
-  });
+      try {
+        const installation = await githubAppService.connectInstallation(
+          {
+            orgId: auth.activeOrgId,
+            installationId:
+              typeof installationId === 'string' ? installationId : undefined,
+            accountLogin,
+            accountType: accountType === 'User' ? 'User' : 'Organization',
+            accessToken:
+              typeof accessToken === 'string' && accessToken.trim()
+                ? accessToken.trim()
+                : undefined,
+            repositories: Array.isArray(repositories) ? repositories : undefined,
+          },
+          store
+        );
+
+        return res.status(201).json({
+          installation: githubAppService.toPublicInstallationView(installation),
+        });
+      } catch (err: unknown) {
+        return res.status(400).json({
+          error:
+            err instanceof Error
+              ? err.message
+              : 'Failed to connect GitHub account or installation.',
+        });
+      }
+    }
+  );
 
   router.get('/github/repos', requireAuth, (req: Request, res: Response) => {
     const auth = req.auth!;

@@ -740,10 +740,15 @@ export async function retryFailedDeployment(deploymentId: string): Promise<{
 export async function connectGitHubInstallation(params: {
   accountLogin: string;
   accountType?: 'User' | 'Organization';
+  accessToken?: string;
+  installationId?: string;
 }): Promise<{
   installation: {
     installationId: string;
     accountLogin: string;
+    authMode?: 'github_app' | 'token_authenticated' | 'public_unauthenticated' | 'mock';
+    hasEncryptedToken?: boolean;
+    maskedTokenPreview?: string;
     repositories: GitHubConnectedRepo[];
   };
 }> {

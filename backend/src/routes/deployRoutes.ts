@@ -2,6 +2,7 @@ import { Request, Response, Router } from 'express';
 import { authService } from '../services/authService';
 import { DeploymentJobQueue, deploymentJobQueue } from '../services/deploymentJobQueue';
 import { DeploymentManager, deploymentManager } from '../services/deploymentManager';
+import { githubAppService } from '../services/githubAppService';
 import { repositoryAnalyzer } from '../services/repositoryAnalyzer';
 import { securityGuardrails } from '../services/securityGuardrails';
 import { selfHealingEngine } from '../services/selfHealingEngine';
@@ -126,10 +127,27 @@ export function createDeployRouter(
         ? branch.trim()
         : repoCheck.data.branch || 'main';
 
+    let ephemeralToken: string | undefined;
+    const matchedInst = store.findGitHubInstallationForRepo(
+      `${repoCheck.data.owner}/${repoCheck.data.repo}`
+    );
+    if (matchedInst) {
+      try {
+        const tok = await githubAppService.getEphemeralInstallationToken(
+          matchedInst.installationId,
+          store
+        );
+        ephemeralToken = tok.token;
+      } catch {
+        // Proceed unauthenticated if installation token is unavailable
+      }
+    }
+
     const analysis = await repositoryAnalyzer.analyzeRemoteGitHubRepo(
       repoCheck.data.owner,
       repoCheck.data.repo,
-      effectiveBranch
+      effectiveBranch,
+      ephemeralToken
     );
 
     return res.json({

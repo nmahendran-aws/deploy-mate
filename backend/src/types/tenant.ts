@@ -104,6 +104,13 @@ export interface GitHubInstallationRecord {
   orgId: string;
   accountLogin: string;
   accountType: 'User' | 'Organization';
+  authMode?: 'github_app' | 'token_authenticated' | 'public_unauthenticated' | 'mock';
+  encryptedAccessToken?: {
+    ciphertext: string;
+    iv: string;
+    authTag: string;
+    maskedPreview: string;
+  };
   repositories: GitHubConnectedRepo[];
   createdAt: string;
   updatedAt: string;

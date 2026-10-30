@@ -227,8 +227,11 @@ export default function Phase3DeployPage() {
 
   // Phase 9 Sprint 2: GitHub App Private Repos, .env Vault Importer & Instant Rollback State
   const [connectedRepos, setConnectedRepos] = useState<GitHubConnectedRepo[]>([]);
-  const [showGitHubPicker, setShowGitHubPicker] = useState(false);
-  const [ghAccountInput, setGhAccountInput] = useState('acme-cloud');
+  const [showGitHubPicker, setShowGitHubPicker] = useState(true);
+  const [ghAccountInput, setGhAccountInput] = useState('nmahendran-aws');
+  const [ghTokenInput, setGhTokenInput] = useState('');
+  const [ghConnecting, setGhConnecting] = useState(false);
+  const [ghAuthMode, setGhAuthMode] = useState<string | null>(null);
   const [dotEnvPasteText, setDotEnvPasteText] = useState('');
   const [rollingBackId, setRollingBackId] = useState<string | null>(null);
 
@@ -240,7 +243,7 @@ export default function Phase3DeployPage() {
   const [healthCheckPath, setHealthCheckPath] = useState('/health');
   const [lambdaHandler, setLambdaHandler] = useState('index.handler');
   const [runtime, setRuntime] = useState('nodejs20.x');
-  const [showEnvEditor, setShowEnvEditor] = useState(false);
+  const [showEnvEditor, setShowEnvEditor] = useState(true);
   const [envPairs, setEnvPairs] = useState<Array<{ key: string; value: string }>>([
     { key: 'NODE_ENV', value: 'production' },
   ]);
@@ -303,6 +306,8 @@ export default function Phase3DeployPage() {
         setOrganizations(me.organizations);
         setActiveOrgId(me.activeOrgId);
         setActiveRole(me.activeRole);
+        const gh = await fetchGitHubRepos(1, 20).catch(() => null);
+        if (gh) setConnectedRepos(gh.repositories);
       }
     } catch {
       // Unauthenticated guest mode
@@ -525,6 +530,8 @@ export default function Phase3DeployPage() {
           ? `Signed in as ${session.user.email} (.edu Verified Student — Campus Pro Eligible!)`
           : `Signed in to ${session.defaultOrganization.name} (${role})`
       );
+      const gh = await fetchGitHubRepos(1, 20).catch(() => null);
+      setConnectedRepos(gh ? gh.repositories : []);
       await refreshHistory();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Sign-in failed');
@@ -537,6 +544,7 @@ export default function Phase3DeployPage() {
     setOrganizations([]);
     setActiveOrgId(null);
     setActiveRole(null);
+    setConnectedRepos([]);
     setShowOrgDrawer(false);
     setWorkspaceNotice('Signed out — switched to Guest Sandbox mode.');
     await refreshHistory();
@@ -548,6 +556,8 @@ export default function Phase3DeployPage() {
     const match = organizations.find((o) => o.organization.orgId === nextOrgId);
     setActiveRole(match?.role || null);
     setDeployment(null);
+    const gh = await fetchGitHubRepos(1, 20).catch(() => null);
+    setConnectedRepos(gh ? gh.repositories : []);
     await refreshHistory();
   }
 
@@ -608,17 +618,42 @@ export default function Phase3DeployPage() {
   async function handleConnectGitHubApp() {
     if (!ghAccountInput.trim()) return;
     setError(null);
+    setGhConnecting(true);
     try {
+      if (!authUser) {
+        const session = await signInSession({
+          email: 'founder@deploymate.cloud',
+          displayName: 'Startup Founder',
+          authProvider: 'github',
+        });
+        setAuthUser(session.user);
+        setOrganizations(session.organizations);
+        setActiveOrgId(session.defaultOrganization.orgId);
+        setActiveRole('OWNER');
+      }
       const res = await connectGitHubInstallation({
         accountLogin: ghAccountInput.trim(),
-        accountType: 'Organization',
+        accountType: 'User',
+        accessToken: ghTokenInput.trim() || undefined,
       });
-      setConnectedRepos(res.installation.repositories);
-      setWorkspaceNotice(
-        `Connected GitHub App installation for @${res.installation.accountLogin} (${res.installation.repositories.length} private & public repos unlocked).`
+      setGhTokenInput('');
+      setGhAuthMode(res.installation.authMode || null);
+      const fullListing = await fetchGitHubRepos(1, 50).catch(() => null);
+      setConnectedRepos(
+        fullListing ? fullListing.repositories : res.installation.repositories
       );
+      const privCount = res.installation.repositories.filter((r) => r.private).length;
+      const pubCount = res.installation.repositories.length - privCount;
+      setWorkspaceNotice(
+        res.installation.authMode === 'public_unauthenticated'
+          ? `Loaded ${pubCount} live public repo(s) for @${res.installation.accountLogin} from GitHub! Paste a GitHub Fine-Grained Token (Contents: Read-only) to also list & deploy your PRIVATE repos.`
+          : `Connected @${res.installation.accountLogin} (${privCount} PRIVATE + ${pubCount} PUBLIC live GitHub repos unlocked • token encrypted with AES-256-GCM).`
+      );
+      await refreshHistory();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to connect GitHub App');
+    } finally {
+      setGhConnecting(false);
     }
   }
 
@@ -1456,40 +1491,75 @@ export default function Phase3DeployPage() {
                   </button>
                 );
               })}
-              {authUser && (
-                <button
-                  type="button"
-                  onClick={() => void handleOpenGitHubPicker()}
-                  className="text-xs px-3 py-1.5 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 border border-indigo-400/40 font-semibold transition"
-                >
-                  🔒 {showGitHubPicker ? 'Hide GitHub App Repos' : 'Browse Private GitHub App Repos'}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => void handleOpenGitHubPicker()}
+                className="text-xs px-3 py-1.5 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 border border-indigo-400/40 font-semibold transition"
+              >
+                🔒 {showGitHubPicker ? 'Hide GitHub App Repos' : 'Browse Private GitHub App Repos'}
+              </button>
             </div>
 
             {/* DM-906: Connected GitHub App Private/Public Repository & Branch Picker */}
-            {authUser && showGitHubPicker && (
-              <div className="rounded-2xl bg-slate-950/90 border border-indigo-500/35 p-4 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-xs text-indigo-200 font-semibold">
-                    🔒 Official GitHub App Integration (Short-Lived Installation Tokens • Zero Long-Lived PATs)
+            {showGitHubPicker && (
+              <div className="rounded-2xl bg-slate-950/90 border border-indigo-500/40 p-4 space-y-3 shadow-lg">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-xs text-indigo-200 font-bold flex flex-wrap items-center gap-2">
+                      <span>🔒 Official GitHub App Private Repository &amp; Branch Picker (DM-906)</span>
+                      {ghAuthMode && (
+                        <span
+                          className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
+                            ghAuthMode === 'public_unauthenticated'
+                              ? 'bg-sky-500/20 text-sky-300 border-sky-400/40'
+                              : 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40'
+                          }`}
+                        >
+                          {ghAuthMode === 'public_unauthenticated'
+                            ? 'Live GitHub Public API'
+                            : '🔒 Authenticated Private + Public (AES-256-GCM)'}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Live GitHub repo &amp; branch discovery &bull; AES-256-GCM token vaulting &bull; Auto-scrubs <code className="text-indigo-300">.git/config</code> before build
+                    </p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={ghAccountInput}
-                      onChange={(e) => setGhAccountInput(e.target.value)}
-                      placeholder="GitHub Org (e.g. acme-cloud)"
-                      className="rounded-lg bg-slate-900 border border-slate-700 px-2.5 py-1 text-xs text-white font-mono w-40"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => void handleConnectGitHubApp()}
-                      className="px-3 py-1 rounded-lg text-xs font-semibold bg-indigo-500/25 hover:bg-indigo-500/35 text-indigo-200 border border-indigo-400/40"
-                    >
-                      + Connect GitHub App
-                    </button>
+                </div>
+
+                {authUser && (activeRole === 'DEVELOPER' || activeRole === 'VIEWER') && (
+                  <div className="rounded-xl bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-[11px] text-amber-200">
+                    ⚠️ Your current active workspace role is <strong>{activeRole}</strong>. Switch the top Organization selector to an <strong>OWNER / ADMIN</strong> workspace to connect new GitHub installations (RBAC enforced).
                   </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                  <input
+                    type="text"
+                    value={ghAccountInput}
+                    onChange={(e) => setGhAccountInput(e.target.value)}
+                    placeholder="GitHub User or Org (e.g. nmahendran-aws)"
+                    className="sm:col-span-4 rounded-lg bg-slate-900 border border-slate-700 px-2.5 py-1.5 text-xs text-white font-mono"
+                  />
+                  <input
+                    type="password"
+                    value={ghTokenInput}
+                    onChange={(e) => setGhTokenInput(e.target.value)}
+                    placeholder="Optional for Private Repos: github_pat_... or ghp_... (Contents: Read-only)"
+                    className="sm:col-span-5 rounded-lg bg-slate-900 border border-slate-700 px-2.5 py-1.5 text-xs text-white font-mono placeholder-slate-500"
+                  />
+                  <button
+                    type="button"
+                    disabled={ghConnecting}
+                    onClick={() => void handleConnectGitHubApp()}
+                    className="sm:col-span-3 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-500/25 hover:bg-indigo-500/35 disabled:opacity-50 text-indigo-200 border border-indigo-400/40"
+                  >
+                    {ghConnecting
+                      ? 'Fetching GitHub...'
+                      : authUser
+                      ? '🔄 Load Live GitHub Repos'
+                      : '🔐 Sign in & Load Repos'}
+                  </button>
                 </div>
 
                 {connectedRepos.length > 0 ? (
@@ -1546,7 +1616,7 @@ export default function Phase3DeployPage() {
                   </div>
                 ) : (
                   <p className="text-[11px] text-slate-400">
-                    Click <strong>+ Connect GitHub App</strong> above to authorize private organization repositories via ephemeral installation tokens.
+                    Enter your GitHub username/org (e.g. <code className="text-cyan-300">nmahendran-aws</code>) and click <strong>Load Live GitHub Repos</strong> to fetch your real public repos immediately — or paste a GitHub Fine-Grained Token (<code className="text-indigo-300">Contents: Read-only</code>) to also unlock &amp; deploy your <strong>PRIVATE</strong> repositories!
                   </p>
                 )}
               </div>

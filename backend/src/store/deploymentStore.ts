@@ -678,6 +678,16 @@ export class DeploymentStore implements IDeploymentRepository {
   public upsertGitHubInstallation(
     record: GitHubInstallationRecord
   ): GitHubInstallationRecord {
+    // Replace any prior installation for the same (orgId, accountLogin) so stale mock repos are superseded
+    for (const [id, existing] of Object.entries(this.db.githubInstallations)) {
+      if (
+        id !== record.installationId &&
+        existing.orgId === record.orgId &&
+        existing.accountLogin.toLowerCase() === record.accountLogin.toLowerCase()
+      ) {
+        delete this.db.githubInstallations[id];
+      }
+    }
     this.db.githubInstallations[record.installationId] = record;
     this.saveToDisk();
     return record;
