@@ -101,7 +101,9 @@ export class IsolatedBuildRunner {
         throw new Error(`Unable to parse owner/repo from ${cloneUrl}`);
       }
       const [, owner, repo] = match;
-      const authToken = ephemeralGitHubToken || process.env.GITHUB_ACCESS_TOKEN;
+      const rawToken = ephemeralGitHubToken || process.env.GITHUB_ACCESS_TOKEN;
+      const authToken =
+        rawToken && !rawToken.startsWith('ghs_ephemeral_') ? rawToken : undefined;
       const ref = branch ? encodeURIComponent(branch) : 'HEAD';
       const tarballUrl = authToken
         ? `https://api.github.com/repos/${owner}/${repo}/tarball/${ref}`
@@ -110,7 +112,7 @@ export class IsolatedBuildRunner {
 
       onLog?.(
         `Fetching repository source from GitHub into isolated workspace${
-          ephemeralGitHubToken ? ' (via authenticated GitHub token)' : ''
+          authToken ? ' (via authenticated GitHub token)' : ''
         }...`
       );
 
@@ -163,7 +165,16 @@ export class IsolatedBuildRunner {
           : cloneUrl;
         const cloneRes = await this.runSandboxedCommand(
           '/usr/bin/git',
-          ['clone', '--depth=1', '--branch', branch || 'main', authCloneUrl, repoDir],
+          [
+            '-c',
+            'credential.helper=',
+            'clone',
+            '--depth=1',
+            '--branch',
+            branch || 'main',
+            authCloneUrl,
+            repoDir,
+          ],
           workspaceDir,
           this.createSanitizedWorkerEnv()
         );
