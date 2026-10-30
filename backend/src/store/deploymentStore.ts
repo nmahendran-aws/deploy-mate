@@ -262,12 +262,13 @@ export class DeploymentStore implements IDeploymentRepository {
 
     if (existingOwner && existingOwner !== deploymentId) {
       const existingRecord = this.db.deployments[existingOwner];
-      // If an owner is already registered (even if deployment record is about to be inserted in the same tick),
-      // only allow takeover when the prior deployment explicitly reached DELETED or FAILED.
-      if (
-        !existingRecord ||
-        (existingRecord.status !== 'DELETED' && existingRecord.status !== 'FAILED')
-      ) {
+      // If an owner is already registered, only allow takeover when the prior deployment
+      // explicitly reached DELETED or FAILED. In-flight race callers cannot take over.
+      const canTakeover =
+        existingRecord &&
+        (existingRecord.status === 'DELETED' || existingRecord.status === 'FAILED');
+
+      if (!canTakeover) {
         return { reserved: false, existingDeploymentId: existingOwner };
       }
     }

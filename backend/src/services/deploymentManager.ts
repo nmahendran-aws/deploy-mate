@@ -764,6 +764,9 @@ export class DeploymentManager {
       const failedCur = this.store.get(deploymentId);
 
       this.store.addLog(deploymentId, currentPhase, 'ERROR', message);
+      if (failedCur?.customHostname) {
+        this.store.releaseHostname(failedCur.customHostname, deploymentId);
+      }
       this.store.update(deploymentId, {
         status: 'FAILED',
         queuePosition: null,

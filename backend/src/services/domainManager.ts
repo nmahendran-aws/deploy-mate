@@ -276,6 +276,22 @@ export class SharedDomainManager {
       `Task 6: Creating Route 53 Alias record ${customHostname} -> ${dnsWithDot} in Hosted Zone ${params.domainConfig.hostedZoneId}...`
     );
 
+    const isCloudFront = targetHostedZoneId === CLOUDFRONT_HOSTED_ZONE_ID;
+    const aaaaChangeXml = isCloudFront
+      ? `      <Change>
+        <Action>UPSERT</Action>
+        <ResourceRecordSet>
+          <Name>${customHostname}</Name>
+          <Type>AAAA</Type>
+          <AliasTarget>
+            <HostedZoneId>${targetHostedZoneId}</HostedZoneId>
+            <DNSName>${dnsWithDot}</DNSName>
+            <EvaluateTargetHealth>false</EvaluateTargetHealth>
+          </AliasTarget>
+        </ResourceRecordSet>
+      </Change>`
+      : '';
+
     const xmlRes = await this.changeRoute53RecordXml(
       params.domainConfig.hostedZoneId,
       `<?xml version="1.0" encoding="UTF-8"?>
@@ -295,18 +311,7 @@ export class SharedDomainManager {
           </AliasTarget>
         </ResourceRecordSet>
       </Change>
-      <Change>
-        <Action>UPSERT</Action>
-        <ResourceRecordSet>
-          <Name>${customHostname}</Name>
-          <Type>AAAA</Type>
-          <AliasTarget>
-            <HostedZoneId>${targetHostedZoneId}</HostedZoneId>
-            <DNSName>${dnsWithDot}</DNSName>
-            <EvaluateTargetHealth>false</EvaluateTargetHealth>
-          </AliasTarget>
-        </ResourceRecordSet>
-      </Change>
+${aaaaChangeXml}
     </Changes>
   </ChangeBatch>
 </ChangeResourceRecordSetsRequest>`

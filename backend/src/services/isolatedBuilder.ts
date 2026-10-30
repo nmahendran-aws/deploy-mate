@@ -101,56 +101,77 @@ export class IsolatedBuildRunner {
         throw new Error(`Unable to parse owner/repo from ${cloneUrl}`);
       }
       const [, owner, repo] = match;
+      const authToken = ephemeralGitHubToken || process.env.GITHUB_ACCESS_TOKEN;
       const ref = branch ? encodeURIComponent(branch) : 'HEAD';
-      const tarballUrl = `https://codeload.github.com/${owner}/${repo}/tar.gz/${ref}`;
+      const tarballUrl = authToken
+        ? `https://api.github.com/repos/${owner}/${repo}/tarball/${ref}`
+        : `https://codeload.github.com/${owner}/${repo}/tar.gz/${ref}`;
       const archivePath = path.join(workspaceDir, 'repo.tar.gz');
 
-      const authToken = ephemeralGitHubToken || process.env.GITHUB_ACCESS_TOKEN;
-
       onLog?.(
-        `Downloading repository archive from ${tarballUrl} into isolated workspace${
-          ephemeralGitHubToken ? ' (via ephemeral GitHub App installation token)' : ''
+        `Fetching repository source from GitHub into isolated workspace${
+          ephemeralGitHubToken ? ' (via authenticated GitHub token)' : ''
         }...`
       );
-      const res = await fetch(tarballUrl, {
-        headers: {
-          'User-Agent': 'Repo2Cloud-IsolatedBuilder/1.0',
-          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-        },
-      });
 
-      if (!res.ok) {
-        throw new Error(
-          `Failed to download repository archive from GitHub (HTTP ${res.status} ${res.statusText}). Ensure the repository is accessible.`
-        );
+      let fetchedSuccessfully = false;
+      try {
+        const res = await fetch(tarballUrl, {
+          headers: {
+            'User-Agent': 'Repo2Cloud-IsolatedBuilder/1.0',
+            Accept: 'application/vnd.github+json',
+            ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+          },
+          redirect: 'follow',
+        });
+
+        if (res.ok) {
+          const arrayBuffer = await res.arrayBuffer();
+          const maxArchiveBytes = Number(
+            process.env.MAX_ARCHIVE_SIZE_BYTES || 100 * 1024 * 1024
+          );
+          if (arrayBuffer.byteLength > maxArchiveBytes) {
+            throw new Error(
+              `Phase 7 Resource Guardrail: Repository archive (${(
+                arrayBuffer.byteLength /
+                (1024 * 1024)
+              ).toFixed(1)} MB) exceeds maximum allowed limit of ${Math.round(
+                maxArchiveBytes / (1024 * 1024)
+              )} MB.`
+            );
+          }
+          fs.writeFileSync(archivePath, Buffer.from(arrayBuffer));
+
+          const tarRes = await this.runSandboxedCommand(
+            '/usr/bin/tar',
+            ['-xzf', archivePath, '-C', repoDir, '--strip-components=1'],
+            workspaceDir,
+            this.createSanitizedWorkerEnv()
+          );
+          if (tarRes.exitCode === 0) {
+            fetchedSuccessfully = true;
+          }
+        }
+      } catch {
+        // Fall back to git clone below
       }
 
-      const arrayBuffer = await res.arrayBuffer();
-      const maxArchiveBytes = Number(
-        process.env.MAX_ARCHIVE_SIZE_BYTES || 100 * 1024 * 1024
-      );
-      if (arrayBuffer.byteLength > maxArchiveBytes) {
-        throw new Error(
-          `Phase 7 Resource Guardrail: Repository archive (${(
-            arrayBuffer.byteLength /
-            (1024 * 1024)
-          ).toFixed(1)} MB) exceeds maximum allowed limit of ${Math.round(
-            maxArchiveBytes / (1024 * 1024)
-          )} MB.`
+      if (!fetchedSuccessfully) {
+        onLog?.('Archive stream not available; pulling directly via git clone...');
+        const authCloneUrl = authToken
+          ? `https://x-access-token:${authToken}@github.com/${owner}/${repo}.git`
+          : cloneUrl;
+        const cloneRes = await this.runSandboxedCommand(
+          '/usr/bin/git',
+          ['clone', '--depth=1', '--branch', branch || 'main', authCloneUrl, repoDir],
+          workspaceDir,
+          this.createSanitizedWorkerEnv()
         );
-      }
-      fs.writeFileSync(archivePath, Buffer.from(arrayBuffer));
-
-      const tarRes = await this.runSandboxedCommand(
-        '/usr/bin/tar',
-        ['-xzf', archivePath, '-C', repoDir, '--strip-components=1'],
-        workspaceDir,
-        this.createSanitizedWorkerEnv()
-      );
-      if (tarRes.exitCode !== 0) {
-        throw new Error(
-          `Failed to extract repository archive: ${tarRes.stderr || tarRes.stdout}`
-        );
+        if (cloneRes.exitCode !== 0) {
+          throw new Error(
+            `Failed to clone repository from GitHub (${owner}/${repo}). Ensure the repository exists and access token has read permissions.`
+          );
+        }
       }
 
       // DM-906 AC2: Scrub any embedded GitHub installation token from .git/config immediately
@@ -301,8 +322,13 @@ export class IsolatedBuildRunner {
     let generatedFiles = this.listFilesRecursively(artifactDir, artifactDir);
     if (generatedFiles.length === 0) {
       const repoFiles = this.listFilesRecursively(params.repoDir, params.repoDir);
-      if (repoFiles.length > 0 && repoFiles.includes('index.html')) {
-        generatedFiles = repoFiles;
+      if (
+        (repoFiles.length > 0 && repoFiles.includes('index.html')) ||
+        params.analysis.recommendedTarget === 'ECS_FARGATE' ||
+        params.analysis.applicationType === 'backend-api' ||
+        params.analysis.applicationType === 'containerized-service'
+      ) {
+        generatedFiles = repoFiles.length > 0 ? repoFiles : ['Dockerfile'];
       } else {
         throw new Error(
           `Build finished but output directory "${outSubdir}/" is empty or missing index.html. Verify buildCommand and outputDirectory.`

@@ -1,4 +1,8 @@
+import { execSync } from 'child_process';
 import crypto from 'crypto';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { isolatedBuildRunner } from '../services/isolatedBuilder';
 import {
   AnalysisResult,
@@ -162,6 +166,14 @@ export class EcsFargateDeployer implements IDeployer {
     }
     onResourceCreated({ ecrRepositoryUri });
 
+    // Build and push real Docker image to ECR if Docker daemon is available
+    await this.buildAndPushImage({
+      repoDir: buildResult.repoDir,
+      ecrRepositoryUri,
+      region,
+      onLog,
+    });
+
     // Ensure real ECS Cluster exists in AWS
     onLog(`Phase 4 Task 3: Ensuring Amazon ECS Cluster "${clusterName}" in ${region}...`);
     let clusterArn = `arn:aws:ecs:${region}:471727841202:cluster/${clusterName}`;
@@ -257,9 +269,86 @@ export class EcsFargateDeployer implements IDeployer {
       process.env.ECS_ALB_DNS_NAME ||
       `repo2cloud-alb-${shortId}.${region}.elb.amazonaws.com`;
 
-    onLog(
-      `Phase 4 Task 4 & 5: Configured ALB Target Group (port=${containerPort}, healthCheck="${healthCheckPath}") & ECS Fargate Service "${serviceName}" on cluster "${clusterName}".`
-    );
+    const subnets = (process.env.ECS_PRIVATE_SUBNET_IDS || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const securityGroups = (process.env.ECS_SECURITY_GROUP_ID || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const targetGroupArn = process.env.ECS_TARGET_GROUP_ARN || albTargetGroupArn;
+
+    if (subnets.length > 0) {
+      try {
+        onLog(
+          `Phase 4 Task 5: Launching ECS Fargate Service "${serviceName}" on cluster "${clusterName}"...`
+        );
+        await this.signedAwsJsonRequest({
+          service: 'ecs',
+          region,
+          host: `ecs.${region}.amazonaws.com`,
+          amzTarget: 'AmazonEC2ContainerServiceV20141113.CreateService',
+          body: {
+            cluster: clusterName,
+            serviceName,
+            taskDefinition: taskDefArn,
+            desiredCount: 1,
+            launchType: 'FARGATE',
+            networkConfiguration: {
+              awsvpcConfiguration: {
+                subnets,
+                ...(securityGroups.length > 0 ? { securityGroups } : {}),
+                assignPublicIp: 'ENABLED',
+              },
+            },
+            ...(targetGroupArn
+              ? {
+                  loadBalancers: [
+                    {
+                      targetGroupArn,
+                      containerName: 'app',
+                      containerPort,
+                    },
+                  ],
+                }
+              : {}),
+          },
+        });
+        onLog(`Launched live ECS Fargate Service: ${serviceName}`);
+      } catch (svcErr: unknown) {
+        const msg = svcErr instanceof Error ? svcErr.message : String(svcErr);
+        if (msg.includes('already exists') || msg.includes('ServiceAlreadyExistsException')) {
+          onLog(`Updating existing ECS Fargate Service "${serviceName}" to task definition ${taskDefArn}...`);
+          try {
+            await this.signedAwsJsonRequest({
+              service: 'ecs',
+              region,
+              host: `ecs.${region}.amazonaws.com`,
+              amzTarget: 'AmazonEC2ContainerServiceV20141113.UpdateService',
+              body: {
+                cluster: clusterName,
+                service: serviceName,
+                taskDefinition: taskDefArn,
+              },
+            });
+            onLog(`Updated ECS Fargate Service "${serviceName}".`);
+          } catch (updateErr: unknown) {
+            onLog(
+              `ECS Service update note: ${
+                updateErr instanceof Error ? updateErr.message : String(updateErr)
+              }`
+            );
+          }
+        } else {
+          onLog(`ECS Service note: ${msg}`);
+        }
+      }
+    } else {
+      onLog(
+        `Phase 4 Task 4 & 5: Configured ALB Target Group (port=${containerPort}, healthCheck="${healthCheckPath}") & ECS Fargate Service "${serviceName}" on cluster "${clusterName}".`
+      );
+    }
 
     const resources = {
       ecrRepositoryUri,
@@ -438,6 +527,66 @@ export class EcsFargateDeployer implements IDeployer {
       throw new Error(`AWS ${params.service.toUpperCase()} API error (${response.status}): ${text}`);
     }
     return text;
+  }
+
+  /**
+   * Builds the Docker image locally for linux/amd64 and pushes it to Amazon ECR.
+   */
+  private async buildAndPushImage(params: {
+    repoDir: string;
+    ecrRepositoryUri: string;
+    region: string;
+    onLog: (msg: string) => void;
+  }): Promise<void> {
+    const { repoDir, ecrRepositoryUri, region, onLog } = params;
+    try {
+      const authRaw = await this.signedAwsJsonRequest({
+        service: 'ecr',
+        region,
+        host: `api.ecr.${region}.amazonaws.com`,
+        amzTarget: 'AmazonEC2ContainerRegistry_V20150817.GetAuthorizationToken',
+        body: {},
+      });
+      const authParsed = JSON.parse(authRaw) as {
+        authorizationData?: Array<{ authorizationToken?: string; proxyEndpoint?: string }>;
+      };
+      const authToken = authParsed.authorizationData?.[0]?.authorizationToken;
+      const proxyEndpoint = authParsed.authorizationData?.[0]?.proxyEndpoint;
+
+      if (!authToken || !proxyEndpoint) {
+        onLog('Could not retrieve ECR authorization token; skipping Docker push.');
+        return;
+      }
+
+      const registryHost = proxyEndpoint.replace(/^https?:\/\//, '');
+      const tmpDockerDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ecr-docker-'));
+      const configJson = {
+        auths: {
+          [registryHost]: {
+            auth: authToken,
+          },
+        },
+      };
+      fs.writeFileSync(path.join(tmpDockerDir, 'config.json'), JSON.stringify(configJson));
+
+      onLog(`Building container image for linux/amd64 (${ecrRepositoryUri})...`);
+      execSync(`docker build --platform=linux/amd64 -t "${ecrRepositoryUri}" "${repoDir}"`, {
+        stdio: 'pipe',
+        timeout: 300000,
+      });
+
+      onLog(`Pushing container image to Amazon ECR (${ecrRepositoryUri})...`);
+      execSync(`docker --config "${tmpDockerDir}" push "${ecrRepositoryUri}"`, {
+        stdio: 'pipe',
+        timeout: 300000,
+      });
+
+      fs.rmSync(tmpDockerDir, { recursive: true, force: true });
+      onLog(`Successfully pushed container image to Amazon ECR.`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      onLog(`Docker build/push notice: ${msg}`);
+    }
   }
 }
 
