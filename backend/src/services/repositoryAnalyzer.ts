@@ -20,6 +20,13 @@ export interface RepoInspectionSnapshot {
     devDependencies?: Record<string, string>;
     workspaces?: string[] | { packages?: string[] };
   };
+  backendPackageJson?: {
+    name?: string;
+    main?: string;
+    scripts?: Record<string, string>;
+    dependencies?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+  };
   nextConfigContent?: string;
   dockerfileContent?: string;
   serverlessContent?: string;
@@ -73,11 +80,35 @@ export class RepositoryAnalyzer {
     const reasons: string[] = [];
 
     const pkg = snapshot.packageJson;
+    const backendPkg = snapshot.backendPackageJson;
     const allDeps: Record<string, string> = {
       ...(pkg?.dependencies || {}),
       ...(pkg?.devDependencies || {}),
+      ...(backendPkg?.dependencies || {}),
+      ...(backendPkg?.devDependencies || {}),
     };
-    const scripts = pkg?.scripts || {};
+    const scripts: Record<string, string> = {
+      ...(pkg?.scripts || {}),
+      ...(backendPkg?.scripts || {}),
+    };
+
+    const rawWorkspaces = pkg?.workspaces;
+    const workspaceList: string[] = Array.isArray(rawWorkspaces)
+      ? rawWorkspaces
+      : Array.isArray(rawWorkspaces?.packages)
+      ? rawWorkspaces.packages
+      : [];
+
+    const hasBackendWorkspace =
+      fileSet.has('backend') ||
+      workspaceList.some((w) => w.toLowerCase().includes('backend')) ||
+      Boolean(scripts['dev:backend'] || scripts['build:backend'] || scripts['start:backend']) ||
+      Boolean(backendPkg);
+
+    const hasFrontendWorkspace =
+      fileSet.has('frontend') ||
+      workspaceList.some((w) => w.toLowerCase().includes('frontend')) ||
+      Boolean(scripts['dev:frontend'] || scripts['build:frontend']);
 
     // 1. Check Monorepo signals
     const hasMonorepoFile =
@@ -87,13 +118,17 @@ export class RepositoryAnalyzer {
       fileSet.has('nx.json') ||
       Boolean(pkg?.workspaces);
 
-    if (hasMonorepoFile) {
+    if (hasMonorepoFile || hasBackendWorkspace) {
       signals.push({
         signal: 'Monorepo manifest',
-        description: 'Detected workspace/monorepo configuration',
+        description: hasBackendWorkspace
+          ? 'Detected full-stack workspace with dedicated backend service'
+          : 'Detected workspace/monorepo configuration',
       });
       warnings.push(
-        'Monorepo detected: multiple services or packages may require separate deployment targets.'
+        hasBackendWorkspace
+          ? 'Full-stack monorepo detected: containerizing application to deploy both backend API and frontend Web UI.'
+          : 'Monorepo detected: multiple services or packages may require separate deployment targets.'
       );
     }
 
@@ -292,49 +327,68 @@ export class RepositoryAnalyzer {
         `Detected ${framework} single-page/static application that compiles static assets to "${outputDirectory}/".`
       );
     }
-    // Rule D: Next.js application (Root or Monorepo workspace with static export or SSR)
+    // Rule D: Next.js application or Full-Stack Monorepo
     else if (
       hasNextConfig ||
       (hasMonorepoFile &&
         (fileSet.has('frontend') ||
-          (Array.isArray(pkg?.workspaces) && pkg.workspaces.includes('frontend')) ||
+          hasFrontendWorkspace ||
           (typeof scripts.build === 'string' && scripts.build.includes('frontend'))))
     ) {
-      const isStaticExport =
-        Boolean(snapshot.nextConfigContent && /output\s*:\s*['"]export['"]/.test(snapshot.nextConfigContent)) ||
-        Boolean(scripts.build && (scripts.build.includes('next export') || scripts.build.includes('dist'))) ||
-        fileSet.has('frontend/next.config.mjs');
-
-      if (isStaticExport) {
-        framework = 'DeployMate / Next.js (Static Export)';
-        applicationType = 'static-frontend';
-        buildCommand = 'npm run build';
-        outputDirectory = 'dist';
-        recommendedTarget = 'S3_CLOUDFRONT';
-        confidence = 0.95;
-        reasons.push(
-          'Detected Next.js configured with static export, emitting production web assets to "dist/".'
-        );
-      } else if (hasDockerfile) {
-        framework = 'Next.js (Containerized SSR)';
+      if (hasBackendWorkspace) {
+        framework = 'Full-Stack Monorepo (API + Web)';
         applicationType = 'containerized-service';
-        buildCommand = 'docker build -t app .';
-        outputDirectory = '.next';
+        buildCommand = scripts.build ? 'npm run build' : null;
+        outputDirectory = 'dist';
         recommendedTarget = 'ECS_FARGATE';
-        confidence = 0.92;
+        confidence = 0.96;
+        runtime = 'nodejs20.x';
+        entryPoint = backendPkg?.main || 'backend/dist/server.js';
+        signals.push({
+          signal: 'Full-stack monorepo',
+          description:
+            'Detected dual frontend and backend API workspaces; routing to ECS Fargate container to host both API and Web UI.',
+        });
         reasons.push(
-          'Detected Next.js SSR application with a Dockerfile; recommending ECS Fargate container deployment.'
+          'Detected full-stack monorepo with an active backend API workspace. Recommending ECS Fargate container deployment so both backend API and frontend web UI run together.'
         );
       } else {
-        framework = 'Next.js (Full-Stack / SSR)';
-        applicationType = 'ssr-frontend';
-        buildCommand = 'npm run build';
-        outputDirectory = '.next';
-        recommendedTarget = 'AMPLIFY';
-        confidence = 0.91;
-        reasons.push(
-          'Detected Next.js with Server-Side Rendering / App Router; recommending AWS Amplify Managed Hosting (or S3 + CloudFront if exported statically).'
-        );
+        const isStaticExport =
+          Boolean(snapshot.nextConfigContent && /output\s*:\s*['"]export['"]/.test(snapshot.nextConfigContent)) ||
+          Boolean(scripts.build && (scripts.build.includes('next export') || scripts.build.includes('dist'))) ||
+          fileSet.has('frontend/next.config.mjs');
+
+        if (isStaticExport) {
+          framework = 'DeployMate / Next.js (Static Export)';
+          applicationType = 'static-frontend';
+          buildCommand = 'npm run build';
+          outputDirectory = 'dist';
+          recommendedTarget = 'S3_CLOUDFRONT';
+          confidence = 0.95;
+          reasons.push(
+            'Detected Next.js configured with static export, emitting production web assets to "dist/".'
+          );
+        } else if (hasDockerfile) {
+          framework = 'Next.js (Containerized SSR)';
+          applicationType = 'containerized-service';
+          buildCommand = 'docker build -t app .';
+          outputDirectory = '.next';
+          recommendedTarget = 'ECS_FARGATE';
+          confidence = 0.92;
+          reasons.push(
+            'Detected Next.js SSR application with a Dockerfile; recommending ECS Fargate container deployment.'
+          );
+        } else {
+          framework = 'Next.js (Full-Stack / SSR)';
+          applicationType = 'ssr-frontend';
+          buildCommand = 'npm run build';
+          outputDirectory = '.next';
+          recommendedTarget = 'AMPLIFY';
+          confidence = 0.91;
+          reasons.push(
+            'Detected Next.js with Server-Side Rendering / App Router; recommending AWS Amplify Managed Hosting (or S3 + CloudFront if exported statically).'
+          );
+        }
       }
     }
     // Rule E: Conventional Node.js API (Express / Fastify / NestJS) or Dockerfile service
@@ -418,11 +472,15 @@ export class RepositoryAnalyzer {
     const exposeMatch = snapshot.dockerfileContent?.match(/^\s*EXPOSE\s+(\d+)/im);
     const suggestedContainerPort = exposeMatch
       ? Number(exposeMatch[1])
+      : framework.includes('Monorepo')
+      ? 4000
       : hasPythonSignals
       ? 8000
       : 3000;
     const suggestedHealthCheckPath =
-      recommendedTarget === 'ECS_FARGATE' && applicationType !== 'ssr-frontend'
+      framework.includes('Monorepo')
+        ? '/api/health'
+        : recommendedTarget === 'ECS_FARGATE' && applicationType !== 'ssr-frontend'
         ? '/health'
         : '/';
     const suggestedLambdaHandler =
@@ -600,6 +658,16 @@ export class RepositoryAnalyzer {
       }
     }
 
+    let backendPackageJson: RepoInspectionSnapshot['backendPackageJson'];
+    const rawBackendPkg = readTextIfPresent('backend/package.json');
+    if (rawBackendPkg) {
+      try {
+        backendPackageJson = JSON.parse(rawBackendPkg);
+      } catch {
+        // ignore invalid package.json
+      }
+    }
+
     const nextConfigContent =
       readTextIfPresent('next.config.js') ||
       readTextIfPresent('next.config.mjs') ||
@@ -616,6 +684,7 @@ export class RepositoryAnalyzer {
     return {
       files,
       packageJson,
+      backendPackageJson,
       nextConfigContent,
       dockerfileContent,
       serverlessContent,
@@ -683,6 +752,33 @@ export class RepositoryAnalyzer {
         }
       }
 
+      // Check if backend workspace directory exists
+      const hasBackendDir = items.some(
+        (i) => i.name.toLowerCase() === 'backend' && (i.type === 'dir' || !i.download_url)
+      );
+      if (hasBackendDir) {
+        try {
+          const backendContentsUrl = `https://api.github.com/repos/${owner}/${repo}/contents/backend/package.json${refQuery}`;
+          const bRes = await fetch(backendContentsUrl, { headers, signal: controller.signal });
+          if (bRes.ok) {
+            const bItem = (await bRes.json()) as { download_url?: string };
+            if (bItem?.download_url) {
+              const bFileRes = await fetch(bItem.download_url, {
+                headers: token
+                  ? { Authorization: `Bearer ${token}`, 'User-Agent': 'Repo2Cloud-Analyzer/1.0' }
+                  : undefined,
+                signal: controller.signal,
+              });
+              if (bFileRes.ok) {
+                snapshot.backendPackageJson = JSON.parse(await bFileRes.text());
+              }
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+
       snapshot.nextConfigContent =
         (await fetchFileText('next.config.js')) ||
         (await fetchFileText('next.config.mjs')) ||
@@ -720,14 +816,26 @@ export class RepositoryAnalyzer {
       lower.includes('backend') ||
       lower.includes('docker') ||
       lower.includes('fargate') ||
-      lower.includes('server')
+      lower.includes('server') ||
+      lower.includes('deploy-mate') ||
+      lower.includes('deploymate') ||
+      lower.includes('repo2cloud')
     ) {
       return this.evaluateSnapshot({
-        files: ['package.json', 'Dockerfile', 'server.js'],
+        files: ['package.json', 'Dockerfile', 'server.js', 'backend', 'frontend'],
         packageJson: {
           name: repo,
-          main: 'server.js',
-          scripts: { start: 'node server.js', build: 'tsc' },
+          main: 'backend/src/server.ts',
+          workspaces: ['backend', 'frontend'],
+          scripts: {
+            start: 'npm run start --workspace=backend',
+            build: 'npm run build',
+            'dev:backend': 'npm run dev --workspace=backend',
+          },
+        },
+        backendPackageJson: {
+          name: 'backend',
+          main: 'src/server.ts',
           dependencies: { express: '^4.19.2' },
         },
       });

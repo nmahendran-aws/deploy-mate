@@ -102,7 +102,31 @@ async function runPhase1To3Tests(): Promise<void> {
     },
   });
   assert.strictEqual(amplifyResult.recommendedTarget, 'AMPLIFY');
-  console.log('   ✓ Phase 3 Multi-Target Recommendation Engine verified for S3_CLOUDFRONT, ECS_FARGATE, LAMBDA_API_GATEWAY, and AMPLIFY.');
+
+  // Full-Stack Monorepo Target: ECS_FARGATE (API + Web Frontend)
+  const monorepoResult = analyzer.evaluateSnapshot({
+    files: ['package.json', 'backend', 'frontend', 'frontend/next.config.mjs'],
+    packageJson: {
+      name: 'deploy-mate',
+      workspaces: ['backend', 'frontend'],
+      scripts: {
+        dev: 'npm run dev --workspace=backend & npm run dev --workspace=frontend',
+        'dev:backend': 'npm run dev --workspace=backend',
+        build: 'npm run build',
+      },
+    },
+    backendPackageJson: {
+      name: 'backend',
+      main: 'src/server.ts',
+      dependencies: { express: '^4.19.2' },
+    },
+  });
+  assert.strictEqual(monorepoResult.recommendedTarget, 'ECS_FARGATE');
+  assert.strictEqual(monorepoResult.framework, 'Full-Stack Monorepo (API + Web)');
+  assert.strictEqual(monorepoResult.suggestedContainerPort, 4000);
+  assert.strictEqual(monorepoResult.suggestedHealthCheckPath, '/api/health');
+
+  console.log('   ✓ Phase 3 Multi-Target Recommendation Engine verified for S3_CLOUDFRONT, ECS_FARGATE, LAMBDA_API_GATEWAY, and AMPLIFY (including Full-Stack Monorepos).');
 
   // Phase 2: Subdomain & Server-Controlled Base Domain Validation
   console.log('3. Testing Phase 2 (RFC-1123 subdomain & server-controlled domain validation)...');
