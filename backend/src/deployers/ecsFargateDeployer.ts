@@ -142,7 +142,7 @@ export class EcsFargateDeployer implements IDeployer {
         service: 'ecr',
         region,
         host: `api.ecr.${region}.amazonaws.com`,
-        amzTarget: 'AmazonEC2ContainerRegistry_V20150817.CreateRepository',
+        amzTarget: 'AmazonEC2ContainerRegistry_V20150921.CreateRepository',
         body: {
           repositoryName: ecrRepoName,
           imageScanningConfiguration: { scanOnPush: true },
@@ -424,7 +424,7 @@ export class EcsFargateDeployer implements IDeployer {
             service: 'ecr',
             region,
             host: `api.ecr.${region}.amazonaws.com`,
-            amzTarget: 'AmazonEC2ContainerRegistry_V20150817.DeleteRepository',
+            amzTarget: 'AmazonEC2ContainerRegistry_V20150921.DeleteRepository',
             body: {
               repositoryName,
               force: true,
@@ -544,7 +544,7 @@ export class EcsFargateDeployer implements IDeployer {
         service: 'ecr',
         region,
         host: `api.ecr.${region}.amazonaws.com`,
-        amzTarget: 'AmazonEC2ContainerRegistry_V20150817.GetAuthorizationToken',
+        amzTarget: 'AmazonEC2ContainerRegistry_V20150921.GetAuthorizationToken',
         body: {},
       });
       const authParsed = JSON.parse(authRaw) as {
