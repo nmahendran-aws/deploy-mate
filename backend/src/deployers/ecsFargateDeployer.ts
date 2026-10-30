@@ -539,6 +539,7 @@ export class EcsFargateDeployer implements IDeployer {
     onLog: (msg: string) => void;
   }): Promise<void> {
     const { repoDir, ecrRepositoryUri, region, onLog } = params;
+    let tmpDockerDir: string | null = null;
     try {
       const authRaw = await this.signedAwsJsonRequest({
         service: 'ecr',
@@ -554,12 +555,11 @@ export class EcsFargateDeployer implements IDeployer {
       const proxyEndpoint = authParsed.authorizationData?.[0]?.proxyEndpoint;
 
       if (!authToken || !proxyEndpoint) {
-        onLog('Could not retrieve ECR authorization token; skipping Docker push.');
-        return;
+        throw new Error('Could not retrieve ECR authorization token for Docker push.');
       }
 
       const registryHost = proxyEndpoint.replace(/^https?:\/\//, '');
-      const tmpDockerDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ecr-docker-'));
+      tmpDockerDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ecr-docker-'));
       const configJson = {
         auths: {
           [registryHost]: {
@@ -572,20 +572,24 @@ export class EcsFargateDeployer implements IDeployer {
       onLog(`Building container image for linux/amd64 (${ecrRepositoryUri})...`);
       execSync(`docker build --platform=linux/amd64 -t "${ecrRepositoryUri}" "${repoDir}"`, {
         stdio: 'pipe',
-        timeout: 300000,
+        timeout: 600000,
       });
 
       onLog(`Pushing container image to Amazon ECR (${ecrRepositoryUri})...`);
       execSync(`docker --config "${tmpDockerDir}" push "${ecrRepositoryUri}"`, {
         stdio: 'pipe',
-        timeout: 300000,
+        timeout: 600000,
       });
 
-      fs.rmSync(tmpDockerDir, { recursive: true, force: true });
       onLog(`Successfully pushed container image to Amazon ECR.`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       onLog(`Docker build/push notice: ${msg}`);
+      throw new Error(`Failed to build and push container image to ECR: ${msg}`);
+    } finally {
+      if (tmpDockerDir && fs.existsSync(tmpDockerDir)) {
+        fs.rmSync(tmpDockerDir, { recursive: true, force: true });
+      }
     }
   }
 }

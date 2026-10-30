@@ -1,5 +1,17 @@
-# Production Dockerfile for DeployMate (Full-Stack Monorepo)
-FROM --platform=linux/amd64 node:20.15.1-alpine3.20
+# Production Multi-Stage Dockerfile for DeployMate (Full-Stack Monorepo)
+FROM --platform=linux/amd64 node:20.15.1-alpine3.20 AS builder
+WORKDIR /app
+
+COPY package*.json ./
+COPY backend/package*.json ./backend/
+COPY frontend/package*.json ./frontend/
+RUN npm ci
+
+COPY . .
+RUN npm run build --workspace=backend
+RUN npm run build --workspace=frontend
+
+FROM --platform=linux/amd64 node:20.15.1-alpine3.20 AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
@@ -9,8 +21,8 @@ COPY package*.json ./
 COPY backend/package*.json ./backend/
 RUN npm ci --omit=dev --workspace=backend
 
-COPY backend/dist ./backend/dist
-COPY frontend/out ./frontend/out
+COPY --from=builder /app/backend/dist ./backend/dist
+COPY --from=builder /app/frontend/out ./frontend/out
 
 EXPOSE 4000
 

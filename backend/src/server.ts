@@ -101,8 +101,12 @@ export function createApp(
   instance.use('/api', createDeployRouter(store, manager, queue));
 
   // Serve Next.js static export frontend from /frontend/out when available
-  const frontendOutDir = path.resolve(__dirname, '../../frontend/out');
-  if (fs.existsSync(frontendOutDir)) {
+  const candidateDirs = [
+    path.resolve(__dirname, '../../frontend/out'),
+    path.resolve(process.cwd(), 'frontend/out'),
+  ];
+  const frontendOutDir = candidateDirs.find((dir) => fs.existsSync(dir));
+  if (frontendOutDir) {
     instance.use(express.static(frontendOutDir));
     instance.get('*', (req: Request, res: Response, next: NextFunction) => {
       if (req.path.startsWith('/api')) {

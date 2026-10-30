@@ -41,7 +41,7 @@ export class IsolatedBuildRunner {
   ): NodeJS.ProcessEnv {
     const nodeBinDir = path.dirname(process.execPath);
     const extraPaths = repoDir
-      ? `${path.join(repoDir, 'node_modules', '.bin')}:${path.join(repoDir, 'frontend', 'node_modules', '.bin')}:`
+      ? `${path.join(repoDir, 'node_modules', '.bin')}:${path.join(repoDir, 'frontend', 'node_modules', '.bin')}:${path.join(repoDir, 'backend', 'node_modules', '.bin')}:`
       : '';
 
     const safeUserVars: Record<string, string> = {};
@@ -63,7 +63,7 @@ export class IsolatedBuildRunner {
       PATH: `${extraPaths}${nodeBinDir}:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin`,
       HOME: this.buildRoot,
       CI: 'true',
-      NODE_ENV: 'production',
+      NODE_ENV: 'development',
       NPM_CONFIG_AUDIT: 'false',
       NPM_CONFIG_FUND: 'false',
       ...safeUserVars,
@@ -289,7 +289,7 @@ export class IsolatedBuildRunner {
           log('Installing dependencies in isolated worker with "--ignore-scripts" protection...');
           const installRes = await this.runSandboxedCommand(
             nodeExec,
-            [npmCli, 'install', '--ignore-scripts', '--no-audit', '--no-fund'],
+            [npmCli, 'install', '--include=dev', '--ignore-scripts', '--no-audit', '--no-fund'],
             params.repoDir,
             sanitizedEnv
           );
@@ -336,7 +336,8 @@ export class IsolatedBuildRunner {
       if (
         (repoFiles.length > 0 && repoFiles.includes('index.html')) ||
         params.analysis.recommendedTarget === 'ECS_FARGATE' ||
-        params.analysis.applicationType === 'backend-api' ||
+        params.analysis.applicationType === 'node-server' ||
+        params.analysis.applicationType === 'monorepo' ||
         params.analysis.applicationType === 'containerized-service'
       ) {
         generatedFiles = repoFiles.length > 0 ? repoFiles : ['Dockerfile'];
