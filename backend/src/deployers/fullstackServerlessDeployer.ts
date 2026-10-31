@@ -218,15 +218,37 @@ export class FullstackServerlessDeployer implements IDeployer {
 
     // Step 2: Deploy Backend to Lambda + API Gateway v2
     ctx.onLog(
-      `Phase 10: Packaging and deploying serverless Express API to AWS Lambda (${functionName})...`
+      `Phase 10: Bundling serverless Express API handler with esbuild...`
     );
+    const lambdaEntry = path.join(ctx.buildResult.repoDir, 'backend', 'src', 'lambda.ts');
+    const bundledOut = path.join(ctx.buildResult.repoDir, 'index.js');
+    if (fs.existsSync(lambdaEntry)) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { execSync } = require('child_process');
+        execSync(
+          `npx esbuild "${lambdaEntry}" --bundle --platform=node --target=node20 --outfile="${bundledOut}" --external:@aws-sdk`,
+          { stdio: 'pipe' }
+        );
+        ctx.onLog(
+          `Phase 10: Bundled backend API into standalone index.js (${(
+            fs.statSync(bundledOut).size / 1024
+          ).toFixed(1)} KB).`
+        );
+      } catch (e: unknown) {
+        ctx.onLog(
+          `Notice: esbuild bundling fell back: ${e instanceof Error ? e.message : String(e)}`
+        );
+      }
+    }
+
     const lambdaDeployOutput = await lambdaApiGatewayDeployer.deploy({
       ...ctx,
       deployment: {
         ...ctx.deployment,
         targetConfig: {
           ...ctx.deployment.targetConfig,
-          lambdaHandler: 'backend/dist/lambda.handler',
+          lambdaHandler: 'index.handler',
           runtime: 'nodejs20.x',
         },
       },

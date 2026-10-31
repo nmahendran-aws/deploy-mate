@@ -518,10 +518,10 @@ def handler(event, context):
       (f) => !f.startsWith('node_modules/') && !f.startsWith('.git/') && !f.endsWith('.tar.gz')
     );
 
-    for (const rel of relFiles.slice(0, 60)) {
+    for (const rel of relFiles.slice(0, 100)) {
       const abs = path.join(params.repoDir, rel);
       const stat = fs.statSync(abs);
-      if (stat.isFile() && stat.size <= 2 * 1024 * 1024) {
+      if (stat.isFile() && stat.size <= 15 * 1024 * 1024) {
         entries.push({
           name: rel.split(path.sep).join('/'),
           data: fs.readFileSync(abs),
