@@ -1759,7 +1759,7 @@ export default function Phase3DeployPage() {
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3.5">
                 {DEFAULT_TARGET_META.map((meta) => {
                   const optionScore = analysis?.targetOptions?.find(
                     (o) => o.target === meta.target
@@ -2423,6 +2423,33 @@ export default function Phase3DeployPage() {
                     {deployment.resources.route53RecordName
                       ? `${deployment.resources.route53RecordName} → Amplify`
                       : deployment.infrastructureUrl || 'Default (*.amplifyapp.com)'}
+                  </div>
+                </div>
+              </div>
+            ) : deployment.target === 'FULLSTACK_SERVERLESS' ? (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <div className="rounded-xl bg-slate-950/90 border border-emerald-500/30 p-3.5">
+                  <div className="text-emerald-300 font-semibold">S3 Bucket &amp; CloudFront OAC</div>
+                  <div className="font-mono text-slate-200 mt-1 truncate" title={deployment.resources.s3BucketName}>
+                    {deployment.resources.s3BucketName
+                      ? `${deployment.resources.s3BucketName} (/*)`
+                      : 'Pending...'}
+                  </div>
+                </div>
+                <div className="rounded-xl bg-slate-950/90 border border-emerald-500/30 p-3.5">
+                  <div className="text-emerald-300 font-semibold">Lambda API &amp; HTTP Gateway</div>
+                  <div className="font-mono text-slate-200 mt-1 truncate" title={deployment.resources.lambdaFunctionName}>
+                    {deployment.resources.lambdaFunctionName
+                      ? `${deployment.resources.lambdaFunctionName} (/api/*)`
+                      : 'Pending...'}
+                  </div>
+                </div>
+                <div className="rounded-xl bg-slate-950/90 border border-emerald-500/30 p-3.5">
+                  <div className="text-emerald-300 font-semibold">CloudFront CDN &amp; Route 53</div>
+                  <div className="font-mono text-slate-200 mt-1 truncate" title={deployment.resources.route53RecordName}>
+                    {deployment.resources.route53RecordName
+                      ? `${deployment.resources.route53RecordName} → Dual-Origin`
+                      : deployment.resources.cloudFrontDistributionId || 'Pending...'}
                   </div>
                 </div>
               </div>
