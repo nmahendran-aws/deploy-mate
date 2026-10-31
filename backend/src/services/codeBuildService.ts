@@ -16,6 +16,8 @@ export interface CodeBuildJobParams {
   userEnvVars?: Record<string, string>;
   targetS3Bucket?: string;
   targetS3Prefix?: string;
+  artifactS3Bucket?: string;
+  artifactS3Key?: string;
   ecrRepositoryUri?: string;
   dryRun?: boolean;
   onLog?: (message: string) => void;
@@ -54,9 +56,21 @@ export class CodeBuildService {
     branch?: string;
     targetS3Bucket?: string;
     targetS3Prefix?: string;
+    artifactS3Bucket?: string;
+    artifactS3Key?: string;
     ecrRepositoryUri?: string;
   }): string {
-    const { target, analysis, repoUrl, branch = 'main', targetS3Bucket, targetS3Prefix, ecrRepositoryUri } = params;
+    const {
+      target,
+      analysis,
+      repoUrl,
+      branch = 'main',
+      targetS3Bucket,
+      targetS3Prefix,
+      artifactS3Bucket,
+      artifactS3Key,
+      ecrRepositoryUri,
+    } = params;
     const buildCmd = analysis.buildCommand || 'npm run build';
     const outputDir = analysis.outputDirectory || 'dist';
 
@@ -92,9 +106,8 @@ phases:
       nodejs: 20
     commands:
       - echo "Preparing build environment..."
-      - git clone --depth 1 --branch ${branch} \${REPO_URL} repo
-      - cd repo
-      - npm ci || npm install
+      - git clone --depth 1 --branch ${branch} \${REPO_URL} .
+      - npm ci --include=dev || npm install --include=dev
   build:
     commands:
       - echo "Executing production build (${buildCmd})..."
@@ -107,6 +120,30 @@ phases:
 `;
     }
 
+    if (artifactS3Bucket && artifactS3Key) {
+      return `version: 0.2
+phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+    commands:
+      - echo "Preparing build environment..."
+      - git clone --depth 1 --branch ${branch} \${REPO_URL} .
+      - npm ci --include=dev || npm install --include=dev
+  build:
+    commands:
+      - echo "Executing production build (${buildCmd})..."
+      - ${buildCmd}
+  post_build:
+    commands:
+      - echo "Archiving compiled build output from ${outputDir}..."
+      - if [ -d "${outputDir}" ]; then tar -czf /tmp/artifacts.tar.gz -C ${outputDir} .; elif [ -d "dist" ]; then tar -czf /tmp/artifacts.tar.gz -C dist .; else tar -czf /tmp/artifacts.tar.gz .; fi
+      - echo "Uploading build artifacts to s3://${artifactS3Bucket}/${artifactS3Key}..."
+      - aws s3 cp /tmp/artifacts.tar.gz s3://${artifactS3Bucket}/${artifactS3Key}
+      - echo "Build and upload completed successfully."
+`;
+    }
+
     // Default generic buildspec
     return `version: 0.2
 phases:
@@ -114,9 +151,8 @@ phases:
     runtime-versions:
       nodejs: 20
     commands:
-      - git clone --depth 1 --branch ${branch} \${REPO_URL} repo
-      - cd repo
-      - npm ci || npm install
+      - git clone --depth 1 --branch ${branch} \${REPO_URL} .
+      - npm ci --include=dev || npm install --include=dev
   build:
     commands:
       - ${buildCmd}
@@ -159,6 +195,8 @@ phases:
       userEnvVars = {},
       targetS3Bucket,
       targetS3Prefix,
+      artifactS3Bucket,
+      artifactS3Key,
       ecrRepositoryUri,
       dryRun = false,
       onLog,
@@ -172,6 +210,8 @@ phases:
       branch,
       targetS3Bucket,
       targetS3Prefix,
+      artifactS3Bucket,
+      artifactS3Key,
       ecrRepositoryUri,
     });
 
@@ -190,7 +230,11 @@ phases:
         buildStatus: 'SUCCEEDED',
         durationSeconds: 1,
         logsUrl: `https://${this.region}.console.aws.amazon.com/codesuite/codebuild/projects/${this.projectName}/build/mock-${deploymentId}`,
-        artifactS3Uri: targetS3Bucket ? `s3://${targetS3Bucket}/${targetS3Prefix || ''}` : undefined,
+        artifactS3Uri: artifactS3Bucket
+          ? `s3://${artifactS3Bucket}/${artifactS3Key || ''}`
+          : targetS3Bucket
+          ? `s3://${targetS3Bucket}/${targetS3Prefix || ''}`
+          : undefined,
         ecrImageUri: ecrRepositoryUri,
       };
     }
@@ -202,7 +246,6 @@ phases:
     const envVars = [
       { name: 'REPO_URL', value: repoUrl, type: 'PLAINTEXT' as const },
       { name: 'DEPLOYMENT_ID', value: deploymentId, type: 'PLAINTEXT' as const },
-      { name: 'NODE_ENV', value: 'production', type: 'PLAINTEXT' as const },
       ...this.sanitizeEnvironmentVariables(userEnvVars),
     ];
 

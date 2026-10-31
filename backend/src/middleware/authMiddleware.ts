@@ -124,9 +124,9 @@ export function createAuthMiddlewares(store: DeploymentStore = deploymentStore) 
               membershipId: `mem_${userId.slice(-6)}_${orgId.slice(-6)}`,
               orgId,
               userId,
+              userEmail: user.email,
               role: 'OWNER',
               createdAt: now,
-              updatedAt: now,
             });
           }
         }

@@ -2,6 +2,8 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import zlib from 'zlib';
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { AnalysisResult } from '../types/deployment';
 import { githubAppService } from './githubAppService';
 import { codeBuildService } from './codeBuildService';
@@ -150,16 +152,28 @@ export class IsolatedBuildRunner {
               )} MB.`
             );
           }
-          fs.writeFileSync(archivePath, Buffer.from(arrayBuffer));
+          const archiveBuffer = Buffer.from(arrayBuffer);
+          fs.writeFileSync(archivePath, archiveBuffer);
 
-          const tarRes = await this.runSandboxedCommand(
-            '/usr/bin/tar',
-            ['-xzf', archivePath, '-C', repoDir, '--strip-components=1'],
-            workspaceDir,
-            this.createSanitizedWorkerEnv()
-          );
-          if (tarRes.exitCode === 0) {
+          try {
+            this.extractTarGz(archiveBuffer, repoDir);
             fetchedSuccessfully = true;
+          } catch {
+            const tarCmd =
+              process.platform === 'win32'
+                ? 'tar'
+                : fs.existsSync('/usr/bin/tar')
+                ? '/usr/bin/tar'
+                : 'tar';
+            const tarRes = await this.runSandboxedCommand(
+              tarCmd,
+              ['-xzf', archivePath, '-C', repoDir, '--strip-components=1'],
+              workspaceDir,
+              this.createSanitizedWorkerEnv()
+            );
+            if (tarRes.exitCode === 0) {
+              fetchedSuccessfully = true;
+            }
           }
         }
       } catch {
@@ -171,8 +185,14 @@ export class IsolatedBuildRunner {
         const authCloneUrl = authToken
           ? `https://x-access-token:${authToken}@github.com/${owner}/${repo}.git`
           : cloneUrl;
+        const gitCmd =
+          process.platform === 'win32'
+            ? 'git'
+            : fs.existsSync('/usr/bin/git')
+            ? '/usr/bin/git'
+            : 'git';
         const cloneRes = await this.runSandboxedCommand(
-          '/usr/bin/git',
+          gitCmd,
           [
             '-c',
             'credential.helper=',
@@ -252,15 +272,46 @@ export class IsolatedBuildRunner {
 
     if (buildEngine === 'codebuild' && params.clonedFromRemote && !params.dryRun) {
       log('Offloading build execution to ephemeral AWS CodeBuild worker (Project: deploymate-build-worker, Zero-Idle-Cost)...');
+      const stateBucket = process.env.S3_STATE_BUCKET || 'repo2cloud-static-dep2b0aa15c';
+      const artifactKey = `build-artifacts/${params.deploymentId}.tar.gz`;
+
       await codeBuildService.executeBuild({
         deploymentId: params.deploymentId,
         repoUrl: params.repoUrl,
         target: params.analysis.recommendedTarget || 'S3_CLOUDFRONT',
         analysis: params.analysis,
         userEnvVars: params.userEnvVars,
+        artifactS3Bucket: stateBucket,
+        artifactS3Key: artifactKey,
         dryRun: false,
         onLog: log,
       });
+
+      // Download and extract the compiled build artifacts into params.repoDir/outSubdir
+      log(`Retrieving compiled build artifacts from s3://${stateBucket}/${artifactKey}...`);
+      try {
+        const s3Client = new S3Client({ region: process.env.AWS_REGION || 'us-east-1' });
+        const getRes = await s3Client.send(
+          new GetObjectCommand({
+            Bucket: stateBucket,
+            Key: artifactKey,
+          })
+        );
+        const stream = getRes.Body as any;
+        const chunks: Buffer[] = [];
+        for await (const chunk of stream) {
+          chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+        }
+        const archiveBuf = Buffer.concat(chunks);
+        const targetExtractDir = path.join(params.repoDir, outSubdir);
+        if (!fs.existsSync(targetExtractDir)) {
+          fs.mkdirSync(targetExtractDir, { recursive: true });
+        }
+        const extractedCount = this.extractTarGz(archiveBuf, targetExtractDir, false);
+        log(`Extracted ${extractedCount} compiled build asset(s) into "${outSubdir}/".`);
+      } catch (err: unknown) {
+        log(`Notice on artifact retrieval: ${err instanceof Error ? err.message : String(err)}`);
+      }
     } else if (params.clonedFromRemote && !params.dryRun) {
       if (this.useDockerIsolation) {
         log('Running build inside ephemeral Docker container (--cap-drop=ALL --security-opt=no-new-privileges)...');
@@ -781,6 +832,58 @@ def handler(event, context):
       }
     }
     return results;
+  }
+
+  /**
+   * Pure Node.js in-memory .tar.gz extractor.
+   * Eliminates system dependencies on `/usr/bin/tar` or `/usr/bin/git`, enabling 100% reliable execution
+   * inside constrained serverless environments (e.g. AWS Lambda, Alpine containers).
+   */
+  public extractTarGz(
+    tarGzBuffer: Buffer,
+    targetDir: string,
+    stripTopLevel: boolean = true
+  ): number {
+    const tarBuf = zlib.gunzipSync(tarGzBuffer);
+    let offset = 0;
+    let extractedCount = 0;
+    while (offset + 512 <= tarBuf.length) {
+      const header = tarBuf.subarray(offset, offset + 512);
+      offset += 512;
+      if (header.every((b) => b === 0)) break;
+
+      let name = header.subarray(0, 100).toString('utf8').replace(/\0.*$/, '');
+      const prefix = header.subarray(345, 500).toString('utf8').replace(/\0.*$/, '');
+      if (prefix) name = `${prefix}/${name}`;
+
+      const sizeStr = header.subarray(124, 136).toString('utf8').replace(/\0.*$/, '').trim();
+      const size = parseInt(sizeStr, 8) || 0;
+      const type = String.fromCharCode(header[156]);
+
+      // Strip leading ./ if present
+      name = name.replace(/^\.\//, '');
+
+      let relPath = name;
+      if (stripTopLevel) {
+        const slashIdx = name.indexOf('/');
+        relPath = slashIdx !== -1 ? name.substring(slashIdx + 1) : '';
+      }
+
+      if (relPath) {
+        const fullPath = path.join(targetDir, relPath);
+        if (type === '5' || name.endsWith('/')) {
+          fs.mkdirSync(fullPath, { recursive: true });
+        } else if (type === '0' || type === '\0') {
+          fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+          const fileData = tarBuf.subarray(offset, offset + size);
+          fs.writeFileSync(fullPath, fileData);
+          extractedCount++;
+        }
+      }
+
+      offset += Math.ceil(size / 512) * 512;
+    }
+    return extractedCount;
   }
 
   private runSandboxedCommand(

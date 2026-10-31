@@ -6782,7 +6782,7 @@ var require_read = __commonJS({
     var iconv = require_lib2();
     var onFinished = require_on_finished();
     var unpipe = require_unpipe();
-    var zlib = require("zlib");
+    var zlib2 = require("zlib");
     module2.exports = read;
     function read(req, res, next, parse, debug, options) {
       var length;
@@ -6867,12 +6867,12 @@ var require_read = __commonJS({
       }
       switch (encoding) {
         case "deflate":
-          stream = zlib.createInflate();
+          stream = zlib2.createInflate();
           debug("inflate body");
           req.pipe(stream);
           break;
         case "gzip":
-          stream = zlib.createGunzip();
+          stream = zlib2.createGunzip();
           debug("gunzip body");
           req.pipe(stream);
           break;
@@ -26560,6 +26560,8 @@ var import_child_process = require("child_process");
 var import_fs3 = __toESM(require("fs"));
 var import_os2 = __toESM(require("os"));
 var import_path4 = __toESM(require("path"));
+var import_zlib = __toESM(require("zlib"));
+var import_client_s32 = require("@aws-sdk/client-s3");
 
 // backend/src/services/githubAppService.ts
 var import_crypto5 = __toESM(require("crypto"));
@@ -27177,7 +27179,17 @@ var CodeBuildService = class {
    * framework, deployment target, and artifact destination.
    */
   generateBuildspec(params) {
-    const { target, analysis, repoUrl, branch = "main", targetS3Bucket, targetS3Prefix, ecrRepositoryUri } = params;
+    const {
+      target,
+      analysis,
+      repoUrl,
+      branch = "main",
+      targetS3Bucket,
+      targetS3Prefix,
+      artifactS3Bucket,
+      artifactS3Key,
+      ecrRepositoryUri
+    } = params;
     const buildCmd = analysis.buildCommand || "npm run build";
     const outputDir = analysis.outputDirectory || "dist";
     if (target === "ECS_FARGATE" && ecrRepositoryUri) {
@@ -27211,9 +27223,8 @@ phases:
       nodejs: 20
     commands:
       - echo "Preparing build environment..."
-      - git clone --depth 1 --branch ${branch} \${REPO_URL} repo
-      - cd repo
-      - npm ci || npm install
+      - git clone --depth 1 --branch ${branch} \${REPO_URL} .
+      - npm ci --include=dev || npm install --include=dev
   build:
     commands:
       - echo "Executing production build (${buildCmd})..."
@@ -27225,15 +27236,37 @@ phases:
       - echo "Build and upload completed successfully."
 `;
     }
+    if (artifactS3Bucket && artifactS3Key) {
+      return `version: 0.2
+phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+    commands:
+      - echo "Preparing build environment..."
+      - git clone --depth 1 --branch ${branch} \${REPO_URL} .
+      - npm ci --include=dev || npm install --include=dev
+  build:
+    commands:
+      - echo "Executing production build (${buildCmd})..."
+      - ${buildCmd}
+  post_build:
+    commands:
+      - echo "Archiving compiled build output from ${outputDir}..."
+      - if [ -d "${outputDir}" ]; then tar -czf /tmp/artifacts.tar.gz -C ${outputDir} .; elif [ -d "dist" ]; then tar -czf /tmp/artifacts.tar.gz -C dist .; else tar -czf /tmp/artifacts.tar.gz .; fi
+      - echo "Uploading build artifacts to s3://${artifactS3Bucket}/${artifactS3Key}..."
+      - aws s3 cp /tmp/artifacts.tar.gz s3://${artifactS3Bucket}/${artifactS3Key}
+      - echo "Build and upload completed successfully."
+`;
+    }
     return `version: 0.2
 phases:
   install:
     runtime-versions:
       nodejs: 20
     commands:
-      - git clone --depth 1 --branch ${branch} \${REPO_URL} repo
-      - cd repo
-      - npm ci || npm install
+      - git clone --depth 1 --branch ${branch} \${REPO_URL} .
+      - npm ci --include=dev || npm install --include=dev
   build:
     commands:
       - ${buildCmd}
@@ -27267,6 +27300,8 @@ phases:
       userEnvVars = {},
       targetS3Bucket,
       targetS3Prefix,
+      artifactS3Bucket,
+      artifactS3Key,
       ecrRepositoryUri,
       dryRun = false,
       onLog,
@@ -27279,6 +27314,8 @@ phases:
       branch,
       targetS3Bucket,
       targetS3Prefix,
+      artifactS3Bucket,
+      artifactS3Key,
       ecrRepositoryUri
     });
     if (dryRun) {
@@ -27296,7 +27333,7 @@ phases:
         buildStatus: "SUCCEEDED",
         durationSeconds: 1,
         logsUrl: `https://${this.region}.console.aws.amazon.com/codesuite/codebuild/projects/${this.projectName}/build/mock-${deploymentId}`,
-        artifactS3Uri: targetS3Bucket ? `s3://${targetS3Bucket}/${targetS3Prefix || ""}` : void 0,
+        artifactS3Uri: artifactS3Bucket ? `s3://${artifactS3Bucket}/${artifactS3Key || ""}` : targetS3Bucket ? `s3://${targetS3Bucket}/${targetS3Prefix || ""}` : void 0,
         ecrImageUri: ecrRepositoryUri
       };
     }
@@ -27306,7 +27343,6 @@ phases:
     const envVars = [
       { name: "REPO_URL", value: repoUrl, type: "PLAINTEXT" },
       { name: "DEPLOYMENT_ID", value: deploymentId, type: "PLAINTEXT" },
-      { name: "NODE_ENV", value: "production", type: "PLAINTEXT" },
       ...this.sanitizeEnvironmentVariables(userEnvVars)
     ];
     const startCmd = new import_client_codebuild.StartBuildCommand({
@@ -27454,15 +27490,22 @@ var IsolatedBuildRunner = class {
               )} MB.`
             );
           }
-          import_fs3.default.writeFileSync(archivePath, Buffer.from(arrayBuffer));
-          const tarRes = await this.runSandboxedCommand(
-            "/usr/bin/tar",
-            ["-xzf", archivePath, "-C", repoDir, "--strip-components=1"],
-            workspaceDir,
-            this.createSanitizedWorkerEnv()
-          );
-          if (tarRes.exitCode === 0) {
+          const archiveBuffer = Buffer.from(arrayBuffer);
+          import_fs3.default.writeFileSync(archivePath, archiveBuffer);
+          try {
+            this.extractTarGz(archiveBuffer, repoDir);
             fetchedSuccessfully = true;
+          } catch {
+            const tarCmd = process.platform === "win32" ? "tar" : import_fs3.default.existsSync("/usr/bin/tar") ? "/usr/bin/tar" : "tar";
+            const tarRes = await this.runSandboxedCommand(
+              tarCmd,
+              ["-xzf", archivePath, "-C", repoDir, "--strip-components=1"],
+              workspaceDir,
+              this.createSanitizedWorkerEnv()
+            );
+            if (tarRes.exitCode === 0) {
+              fetchedSuccessfully = true;
+            }
           }
         }
       } catch {
@@ -27470,8 +27513,9 @@ var IsolatedBuildRunner = class {
       if (!fetchedSuccessfully) {
         onLog?.("Archive stream not available; pulling directly via git clone...");
         const authCloneUrl = authToken ? `https://x-access-token:${authToken}@github.com/${owner}/${repo}.git` : cloneUrl;
+        const gitCmd = process.platform === "win32" ? "git" : import_fs3.default.existsSync("/usr/bin/git") ? "/usr/bin/git" : "git";
         const cloneRes = await this.runSandboxedCommand(
-          "/usr/bin/git",
+          gitCmd,
           [
             "-c",
             "credential.helper=",
@@ -27528,15 +27572,43 @@ var IsolatedBuildRunner = class {
     const artifactDir = outSubdir === "." ? params.repoDir : import_path4.default.join(params.repoDir, outSubdir);
     if (buildEngine === "codebuild" && params.clonedFromRemote && !params.dryRun) {
       log("Offloading build execution to ephemeral AWS CodeBuild worker (Project: deploymate-build-worker, Zero-Idle-Cost)...");
+      const stateBucket = process.env.S3_STATE_BUCKET || "repo2cloud-static-dep2b0aa15c";
+      const artifactKey = `build-artifacts/${params.deploymentId}.tar.gz`;
       await codeBuildService.executeBuild({
         deploymentId: params.deploymentId,
         repoUrl: params.repoUrl,
         target: params.analysis.recommendedTarget || "S3_CLOUDFRONT",
         analysis: params.analysis,
         userEnvVars: params.userEnvVars,
+        artifactS3Bucket: stateBucket,
+        artifactS3Key: artifactKey,
         dryRun: false,
         onLog: log
       });
+      log(`Retrieving compiled build artifacts from s3://${stateBucket}/${artifactKey}...`);
+      try {
+        const s3Client = new import_client_s32.S3Client({ region: process.env.AWS_REGION || "us-east-1" });
+        const getRes = await s3Client.send(
+          new import_client_s32.GetObjectCommand({
+            Bucket: stateBucket,
+            Key: artifactKey
+          })
+        );
+        const stream = getRes.Body;
+        const chunks = [];
+        for await (const chunk of stream) {
+          chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+        }
+        const archiveBuf = Buffer.concat(chunks);
+        const targetExtractDir = import_path4.default.join(params.repoDir, outSubdir);
+        if (!import_fs3.default.existsSync(targetExtractDir)) {
+          import_fs3.default.mkdirSync(targetExtractDir, { recursive: true });
+        }
+        const extractedCount = this.extractTarGz(archiveBuf, targetExtractDir, false);
+        log(`Extracted ${extractedCount} compiled build asset(s) into "${outSubdir}/".`);
+      } catch (err) {
+        log(`Notice on artifact retrieval: ${err instanceof Error ? err.message : String(err)}`);
+      }
     } else if (params.clonedFromRemote && !params.dryRun) {
       if (this.useDockerIsolation) {
         log("Running build inside ephemeral Docker container (--cap-drop=ALL --security-opt=no-new-privileges)...");
@@ -27954,6 +28026,46 @@ def handler(event, context):
       }
     }
     return results;
+  }
+  /**
+   * Pure Node.js in-memory .tar.gz extractor.
+   * Eliminates system dependencies on `/usr/bin/tar` or `/usr/bin/git`, enabling 100% reliable execution
+   * inside constrained serverless environments (e.g. AWS Lambda, Alpine containers).
+   */
+  extractTarGz(tarGzBuffer, targetDir, stripTopLevel = true) {
+    const tarBuf = import_zlib.default.gunzipSync(tarGzBuffer);
+    let offset = 0;
+    let extractedCount = 0;
+    while (offset + 512 <= tarBuf.length) {
+      const header = tarBuf.subarray(offset, offset + 512);
+      offset += 512;
+      if (header.every((b) => b === 0)) break;
+      let name = header.subarray(0, 100).toString("utf8").replace(/\0.*$/, "");
+      const prefix = header.subarray(345, 500).toString("utf8").replace(/\0.*$/, "");
+      if (prefix) name = `${prefix}/${name}`;
+      const sizeStr = header.subarray(124, 136).toString("utf8").replace(/\0.*$/, "").trim();
+      const size = parseInt(sizeStr, 8) || 0;
+      const type = String.fromCharCode(header[156]);
+      name = name.replace(/^\.\//, "");
+      let relPath = name;
+      if (stripTopLevel) {
+        const slashIdx = name.indexOf("/");
+        relPath = slashIdx !== -1 ? name.substring(slashIdx + 1) : "";
+      }
+      if (relPath) {
+        const fullPath = import_path4.default.join(targetDir, relPath);
+        if (type === "5" || name.endsWith("/")) {
+          import_fs3.default.mkdirSync(fullPath, { recursive: true });
+        } else if (type === "0" || type === "\0") {
+          import_fs3.default.mkdirSync(import_path4.default.dirname(fullPath), { recursive: true });
+          const fileData = tarBuf.subarray(offset, offset + size);
+          import_fs3.default.writeFileSync(fullPath, fileData);
+          extractedCount++;
+        }
+      }
+      offset += Math.ceil(size / 512) * 512;
+    }
+    return extractedCount;
   }
   runSandboxedCommand(command, args, cwd, env) {
     return new Promise((resolve) => {
@@ -28764,7 +28876,7 @@ var ecsFargateDeployer = new EcsFargateDeployer();
 
 // backend/src/deployers/fullstackServerlessDeployer.ts
 var import_client_cloudfront = require("@aws-sdk/client-cloudfront");
-var import_client_s32 = require("@aws-sdk/client-s3");
+var import_client_s33 = require("@aws-sdk/client-s3");
 var import_fs5 = __toESM(require("fs"));
 var import_path6 = __toESM(require("path"));
 
@@ -29371,12 +29483,12 @@ var FullstackServerlessDeployer = class {
         }
       };
     }
-    const s3 = new import_client_s32.S3Client({ region });
+    const s3 = new import_client_s33.S3Client({ region });
     const cloudfront = new import_client_cloudfront.CloudFrontClient({ region: "us-east-1" });
     ctx.onLog(`Creating private S3 bucket "${bucketName}" in ${region}...`);
     try {
       await s3.send(
-        new import_client_s32.CreateBucketCommand({
+        new import_client_s33.CreateBucketCommand({
           Bucket: bucketName,
           ...region !== "us-east-1" ? {
             CreateBucketConfiguration: {
@@ -29386,7 +29498,7 @@ var FullstackServerlessDeployer = class {
         })
       );
       await s3.send(
-        new import_client_s32.PutPublicAccessBlockCommand({
+        new import_client_s33.PutPublicAccessBlockCommand({
           Bucket: bucketName,
           PublicAccessBlockConfiguration: {
             BlockPublicAcls: true,
@@ -29431,7 +29543,7 @@ var FullstackServerlessDeployer = class {
           const cacheControl = ext === ".html" ? "public, max-age=0, must-revalidate" : "public, max-age=31536000, immutable";
           const body = import_fs5.default.readFileSync(fullPath);
           return s3.send(
-            new import_client_s32.PutObjectCommand({
+            new import_client_s33.PutObjectCommand({
               Bucket: bucketName,
               Key: s3Key,
               Body: body,
@@ -29448,11 +29560,21 @@ var FullstackServerlessDeployer = class {
     );
     const lambdaEntry = import_path6.default.join(ctx.buildResult.repoDir, "backend", "src", "lambda.ts");
     const bundledOut = import_path6.default.join(ctx.buildResult.repoDir, "index.js");
-    const prebuiltLambda = import_path6.default.join(process.cwd(), "dist-lambda", "index.js");
-    if (import_fs5.default.existsSync(prebuiltLambda)) {
-      import_fs5.default.copyFileSync(prebuiltLambda, bundledOut);
+    const prebuiltCandidates = [
+      import_path6.default.join(process.cwd(), "dist-lambda", "index.js"),
+      import_path6.default.join(process.cwd(), "index.js")
+    ];
+    let foundPrebuilt;
+    for (const p of prebuiltCandidates) {
+      if (import_fs5.default.existsSync(p)) {
+        foundPrebuilt = p;
+        break;
+      }
+    }
+    if (foundPrebuilt) {
+      import_fs5.default.copyFileSync(foundPrebuilt, bundledOut);
       ctx.onLog(
-        `Phase 10: Deployed pre-bundled standalone serverless Express API (${(import_fs5.default.statSync(bundledOut).size / 1024).toFixed(1)} KB).`
+        `Phase 10: Deployed pre-bundled standalone serverless Express API (${(import_fs5.default.statSync(bundledOut).size / 1024).toFixed(1)} KB) from ${import_path6.default.basename(foundPrebuilt)}.`
       );
     } else if (import_fs5.default.existsSync(lambdaEntry)) {
       try {
@@ -29486,6 +29608,11 @@ var FullstackServerlessDeployer = class {
           lambdaHandler: "index.handler",
           runtime: "nodejs20.x"
         }
+      },
+      userEnvVars: {
+        NODE_ENV: "production",
+        S3_STATE_BUCKET: process.env.S3_STATE_BUCKET || "repo2cloud-static-dep2b0aa15c",
+        ...ctx.userEnvVars || {}
       }
     });
     const apiGatewayEndpoint = lambdaDeployOutput.resources.apiGatewayEndpoint;
@@ -29644,7 +29771,7 @@ var FullstackServerlessDeployer = class {
     };
     try {
       await s3.send(
-        new import_client_s32.PutBucketPolicyCommand({
+        new import_client_s33.PutBucketPolicyCommand({
           Bucket: bucketName,
           Policy: JSON.stringify(bucketPolicy)
         })
@@ -29759,24 +29886,24 @@ var FullstackServerlessDeployer = class {
       }
     }
     if (s3BucketName) {
-      const s3 = new import_client_s32.S3Client({ region });
+      const s3 = new import_client_s33.S3Client({ region });
       try {
         let continuationToken;
         do {
           const listed = await s3.send(
-            new import_client_s32.ListObjectsV2Command({ Bucket: s3BucketName, ContinuationToken: continuationToken })
+            new import_client_s33.ListObjectsV2Command({ Bucket: s3BucketName, ContinuationToken: continuationToken })
           );
           const keys = (listed.Contents || []).filter((o) => Boolean(o.Key)).map((o) => ({ Key: o.Key }));
           if (keys.length > 0) {
-            await s3.send(new import_client_s32.DeleteObjectsCommand({ Bucket: s3BucketName, Delete: { Objects: keys, Quiet: true } }));
+            await s3.send(new import_client_s33.DeleteObjectsCommand({ Bucket: s3BucketName, Delete: { Objects: keys, Quiet: true } }));
           }
           continuationToken = listed.IsTruncated ? listed.NextContinuationToken : void 0;
         } while (continuationToken);
         try {
-          await s3.send(new import_client_s32.DeleteBucketPolicyCommand({ Bucket: s3BucketName }));
+          await s3.send(new import_client_s33.DeleteBucketPolicyCommand({ Bucket: s3BucketName }));
         } catch {
         }
-        await s3.send(new import_client_s32.DeleteBucketCommand({ Bucket: s3BucketName }));
+        await s3.send(new import_client_s33.DeleteBucketCommand({ Bucket: s3BucketName }));
         onLog(`Deleted private S3 bucket ${s3BucketName}.`);
       } catch (err) {
         onLog(`S3 cleanup note: ${err instanceof Error ? err.message : String(err)}`);
@@ -29806,7 +29933,7 @@ var fullstackServerlessDeployer = new FullstackServerlessDeployer();
 var import_fs6 = __toESM(require("fs"));
 var import_path7 = __toESM(require("path"));
 var import_client_cloudfront2 = require("@aws-sdk/client-cloudfront");
-var import_client_s33 = require("@aws-sdk/client-s3");
+var import_client_s34 = require("@aws-sdk/client-s3");
 var CLOUDFRONT_HOSTED_ZONE_ID3 = "Z2FDTNDATAQYW2";
 var MIME_TYPES2 = {
   ".html": "text/html; charset=utf-8",
@@ -29844,11 +29971,11 @@ var S3CloudFrontDeployer = class {
     if (ctx.dryRun) {
       return this.deployDryRun(ctx, bucketName, keyPrefix);
     }
-    const s3 = new import_client_s33.S3Client({ region });
+    const s3 = new import_client_s34.S3Client({ region });
     const cloudfront = new import_client_cloudfront2.CloudFrontClient({ region: "us-east-1" });
     ctx.onLog(`Creating private S3 bucket "${bucketName}" in ${region}...`);
     await s3.send(
-      new import_client_s33.CreateBucketCommand({
+      new import_client_s34.CreateBucketCommand({
         Bucket: bucketName,
         ...region !== "us-east-1" ? {
           CreateBucketConfiguration: {
@@ -29858,7 +29985,7 @@ var S3CloudFrontDeployer = class {
       })
     );
     await s3.send(
-      new import_client_s33.PutPublicAccessBlockCommand({
+      new import_client_s34.PutPublicAccessBlockCommand({
         Bucket: bucketName,
         PublicAccessBlockConfiguration: {
           BlockPublicAcls: true,
@@ -29884,7 +30011,7 @@ var S3CloudFrontDeployer = class {
           const cacheControl = ext === ".html" ? "public, max-age=0, must-revalidate" : "public, max-age=31536000, immutable";
           const body = import_fs6.default.readFileSync(fullPath);
           return s3.send(
-            new import_client_s33.PutObjectCommand({
+            new import_client_s34.PutObjectCommand({
               Bucket: bucketName,
               Key: s3Key,
               Body: body,
@@ -30023,7 +30150,7 @@ var S3CloudFrontDeployer = class {
       ]
     };
     await s3.send(
-      new import_client_s33.PutBucketPolicyCommand({
+      new import_client_s34.PutBucketPolicyCommand({
         Bucket: bucketName,
         Policy: JSON.stringify(bucketPolicy)
       })
@@ -30166,18 +30293,18 @@ var S3CloudFrontDeployer = class {
       }
     }
     if (s3BucketName) {
-      const s3 = new import_client_s33.S3Client({ region });
+      const s3 = new import_client_s34.S3Client({ region });
       try {
         let deletedCount = 0;
         let continuationToken;
         do {
           const listed = await s3.send(
-            new import_client_s33.ListObjectsV2Command({ Bucket: s3BucketName, ContinuationToken: continuationToken })
+            new import_client_s34.ListObjectsV2Command({ Bucket: s3BucketName, ContinuationToken: continuationToken })
           );
           const keys = (listed.Contents || []).filter((obj) => Boolean(obj.Key)).map((obj) => ({ Key: obj.Key }));
           if (keys.length > 0) {
             await s3.send(
-              new import_client_s33.DeleteObjectsCommand({
+              new import_client_s34.DeleteObjectsCommand({
                 Bucket: s3BucketName,
                 Delete: { Objects: keys, Quiet: true }
               })
@@ -30188,10 +30315,10 @@ var S3CloudFrontDeployer = class {
         } while (continuationToken);
         onLog(`Emptied ${deletedCount} object(s) from S3 bucket ${s3BucketName}.`);
         try {
-          await s3.send(new import_client_s33.DeleteBucketPolicyCommand({ Bucket: s3BucketName }));
+          await s3.send(new import_client_s34.DeleteBucketPolicyCommand({ Bucket: s3BucketName }));
         } catch {
         }
-        await s3.send(new import_client_s33.DeleteBucketCommand({ Bucket: s3BucketName }));
+        await s3.send(new import_client_s34.DeleteBucketCommand({ Bucket: s3BucketName }));
         onLog(`Deleted private S3 bucket ${s3BucketName}.`);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -32162,6 +32289,9 @@ function createDeployRouter(store = deploymentStore, manager = deploymentManager
       orgId: req.auth?.activeOrgId || body.orgId,
       createdByUserId: req.auth?.user.userId
     });
+    if (result.ok && result.deployment) {
+      await store.syncToS3();
+    }
     if (!result.ok || !result.deployment) {
       return res.status(result.statusCode).json({
         error: result.error,
@@ -32185,7 +32315,8 @@ function createDeployRouter(store = deploymentStore, manager = deploymentManager
       deployment: dep
     });
   });
-  router.get("/deploy/:id", (req, res) => {
+  router.get("/deploy/:id", async (req, res) => {
+    await store.loadFromS3();
     let record;
     if (req.auth) {
       if (!req.auth.activeOrgId || !req.auth.activeRole) {
@@ -32194,6 +32325,12 @@ function createDeployRouter(store = deploymentStore, manager = deploymentManager
         });
       }
       record = store.getForOrg(req.params.id, req.auth.activeOrgId);
+      if (!record && req.auth.activeRole === "OWNER") {
+        const legacy = store.get(req.params.id);
+        if (legacy && !legacy.orgId) {
+          record = legacy;
+        }
+      }
     } else {
       record = store.get(req.params.id);
     }
@@ -32215,7 +32352,8 @@ function createDeployRouter(store = deploymentStore, manager = deploymentManager
       deployment: record
     });
   });
-  router.get("/deployments", (req, res) => {
+  router.get("/deployments", async (req, res) => {
+    await store.loadFromS3();
     if (req.auth) {
       if (!req.auth.activeOrgId || !req.auth.activeRole) {
         return res.status(403).json({
@@ -33100,9 +33238,33 @@ if (require.main === module) {
 // backend/src/lambda.ts
 var httpHandler = (0, import_serverless_http.default)(app);
 var handler = async (event, context) => {
-  if (event && event.action === "PROCESS_DEPLOYMENT" && event.payload) {
-    const { deploymentId, cloneUrl, domainConfig, userEnvVars, ephemeralGitHubToken } = event.payload;
+  if (event && event.action === "PROCESS_DEPLOYMENT") {
+    const payload = event.payload || event;
+    const deploymentId = payload.deploymentId;
     try {
+      await deploymentStore.loadFromS3();
+      const record = deploymentStore.get(deploymentId);
+      if (!record) {
+        console.error(`[Lambda Worker] Deployment ${deploymentId} not found in store.`);
+        return { statusCode: 404, body: `Deployment ${deploymentId} not found.` };
+      }
+      const cloneUrl = payload.cloneUrl || record.repoUrl;
+      let domainConfig = payload.domainConfig;
+      if (!domainConfig && record.domain) {
+        const domCheck = resolveServerControlledDomain(record.domain);
+        if (domCheck.valid && domCheck.domainConfig) {
+          domainConfig = domCheck.domainConfig;
+        }
+      }
+      const userEnvVars = payload.userEnvVars || {};
+      const ephemeralGitHubToken = payload.ephemeralGitHubToken;
+      if (record.status === "FAILED") {
+        deploymentStore.update(deploymentId, {
+          status: "BUILDING",
+          error: null
+        });
+      }
+      console.log(`[Lambda Worker] Processing background deployment ${deploymentId} (${record.customHostname || record.repoName})...`);
       await deploymentManager.executePipeline(
         deploymentId,
         cloneUrl,
@@ -33110,8 +33272,11 @@ var handler = async (event, context) => {
         userEnvVars,
         ephemeralGitHubToken
       );
+      await deploymentStore.syncToS3();
       return { statusCode: 200, body: JSON.stringify({ ok: true, deploymentId }) };
     } catch (err) {
+      console.error(`[Lambda Worker] Error processing deployment ${deploymentId}:`, err);
+      await deploymentStore.syncToS3();
       return {
         statusCode: 500,
         body: JSON.stringify({

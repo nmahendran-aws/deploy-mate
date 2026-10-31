@@ -272,6 +272,10 @@ export function createDeployRouter(
       createdByUserId: req.auth?.user.userId,
     });
 
+    if (result.ok && result.deployment) {
+      await store.syncToS3();
+    }
+
     if (!result.ok || !result.deployment) {
       return res.status(result.statusCode).json({
         error: result.error,
@@ -300,7 +304,8 @@ export function createDeployRouter(
    * GET /api/deploy/:id
    * Polls deployment status with strict tenant isolation (404 on cross-org IDOR).
    */
-  router.get('/deploy/:id', (req: Request, res: Response) => {
+  router.get('/deploy/:id', async (req: Request, res: Response) => {
+    await store.loadFromS3();
     let record;
     if (req.auth) {
       if (!req.auth.activeOrgId || !req.auth.activeRole) {
@@ -309,6 +314,12 @@ export function createDeployRouter(
         });
       }
       record = store.getForOrg(req.params.id, req.auth.activeOrgId);
+      if (!record && req.auth.activeRole === 'OWNER') {
+        const legacy = store.get(req.params.id);
+        if (legacy && !legacy.orgId) {
+          record = legacy;
+        }
+      }
     } else {
       record = store.get(req.params.id);
     }
@@ -337,7 +348,8 @@ export function createDeployRouter(
    * GET /api/deployments
    * Lists deployments strictly scoped to the caller's active organization when authenticated.
    */
-  router.get('/deployments', (req: Request, res: Response) => {
+  router.get('/deployments', async (req: Request, res: Response) => {
+    await store.loadFromS3();
     if (req.auth) {
       if (!req.auth.activeOrgId || !req.auth.activeRole) {
         return res.status(403).json({

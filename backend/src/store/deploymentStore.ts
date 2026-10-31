@@ -145,7 +145,7 @@ export class DeploymentStore implements IDeploymentRepository {
    * DM-902: Cloud-native shared state synchronization via private S3 state bucket.
    * Ensures multi-container Lambda instances and cold-starts stay synchronized with zero data loss.
    */
-  private async loadFromS3(): Promise<void> {
+  public async loadFromS3(): Promise<void> {
     if (!this.s3Client || !this.s3StateBucket) return;
     try {
       const res = await this.s3Client.send(
@@ -178,7 +178,7 @@ export class DeploymentStore implements IDeploymentRepository {
     }
   }
 
-  private async syncToS3(): Promise<void> {
+  public async syncToS3(): Promise<void> {
     if (!this.s3Client || !this.s3StateBucket) return;
     try {
       await this.s3Client.send(

@@ -224,14 +224,24 @@ export class FullstackServerlessDeployer implements IDeployer {
     );
     const lambdaEntry = path.join(ctx.buildResult.repoDir, 'backend', 'src', 'lambda.ts');
     const bundledOut = path.join(ctx.buildResult.repoDir, 'index.js');
-    const prebuiltLambda = path.join(process.cwd(), 'dist-lambda', 'index.js');
+    const prebuiltCandidates = [
+      path.join(process.cwd(), 'dist-lambda', 'index.js'),
+      path.join(process.cwd(), 'index.js'),
+    ];
+    let foundPrebuilt: string | undefined;
+    for (const p of prebuiltCandidates) {
+      if (fs.existsSync(p)) {
+        foundPrebuilt = p;
+        break;
+      }
+    }
 
-    if (fs.existsSync(prebuiltLambda)) {
-      fs.copyFileSync(prebuiltLambda, bundledOut);
+    if (foundPrebuilt) {
+      fs.copyFileSync(foundPrebuilt, bundledOut);
       ctx.onLog(
         `Phase 10: Deployed pre-bundled standalone serverless Express API (${(
           fs.statSync(bundledOut).size / 1024
-        ).toFixed(1)} KB).`
+        ).toFixed(1)} KB) from ${path.basename(foundPrebuilt)}.`
       );
     } else if (fs.existsSync(lambdaEntry)) {
       try {
@@ -269,6 +279,11 @@ export class FullstackServerlessDeployer implements IDeployer {
           lambdaHandler: 'index.handler',
           runtime: 'nodejs20.x',
         },
+      },
+      userEnvVars: {
+        NODE_ENV: 'production',
+        S3_STATE_BUCKET: process.env.S3_STATE_BUCKET || 'repo2cloud-static-dep2b0aa15c',
+        ...(ctx.userEnvVars || {}),
       },
     });
 
