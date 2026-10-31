@@ -258,8 +258,22 @@ export interface DeploymentRecord {
   completedAt?: string | null;
 }
 
-export const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
+export function getApiBase(): string {
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    return process.env.NEXT_PUBLIC_API_URL;
+  }
+  if (typeof window !== 'undefined') {
+    // If running in local Next.js dev server on port 3000, call backend on 4000
+    if (window.location.hostname === 'localhost' && window.location.port === '3000') {
+      return 'http://localhost:4000/api';
+    }
+    // In all other environments (deployed on https://mahens.maas-fam.com), use same-origin /api
+    return '/api';
+  }
+  return 'http://localhost:4000/api';
+}
+
+export const API_BASE = '/api';
 
 const TOKEN_STORAGE_KEY = 'deploymate_session_token';
 const ORG_STORAGE_KEY = 'deploymate_active_org_id';
@@ -324,7 +338,7 @@ export async function signInSession(params: {
   defaultOrganization: OrganizationRecord;
   organizations: Array<{ organization: OrganizationRecord; role: OrgRole }>;
 }> {
-  const res = await fetch(`${API_BASE}/auth/session`, {
+  const res = await fetch(`${getApiBase()}/auth/session`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
@@ -349,7 +363,7 @@ export async function fetchCurrentSession(): Promise<{
 } | null> {
   const token = getStoredSessionToken();
   if (!token) return null;
-  const res = await fetch(`${API_BASE}/auth/me`, {
+  const res = await fetch(`${getApiBase()}/auth/me`, {
     headers: buildHeaders(),
     credentials: 'include',
   });
@@ -366,7 +380,7 @@ export async function fetchCurrentSession(): Promise<{
 export async function signOutSession(): Promise<void> {
   setStoredSession(null);
   try {
-    await fetch(`${API_BASE}/auth/logout`, {
+    await fetch(`${getApiBase()}/auth/logout`, {
       method: 'POST',
       credentials: 'include',
     });
@@ -387,7 +401,7 @@ export async function createTeamOrganization(params: {
   organization: OrganizationRecord;
   membership: MembershipRecord;
 }> {
-  const res = await fetch(`${API_BASE}/orgs`, {
+  const res = await fetch(`${getApiBase()}/orgs`, {
     method: 'POST',
     headers: buildHeaders(true),
     credentials: 'include',
@@ -406,7 +420,7 @@ export async function createTeamOrganization(params: {
 export async function listOrganizationMembers(orgId: string): Promise<{
   members: MembershipRecord[];
 }> {
-  const res = await fetch(`${API_BASE}/orgs/${encodeURIComponent(orgId)}/members`, {
+  const res = await fetch(`${getApiBase()}/orgs/${encodeURIComponent(orgId)}/members`, {
     headers: buildHeaders(),
     credentials: 'include',
   });
@@ -427,7 +441,7 @@ export async function inviteOrganizationMember(
   membership: MembershipRecord;
   user: UserRecord;
 }> {
-  const res = await fetch(`${API_BASE}/orgs/${encodeURIComponent(orgId)}/members`, {
+  const res = await fetch(`${getApiBase()}/orgs/${encodeURIComponent(orgId)}/members`, {
     method: 'POST',
     headers: buildHeaders(true),
     credentials: 'include',
@@ -445,7 +459,7 @@ export async function inviteOrganizationMember(
  * DM-903: Fetches live worker queue concurrency and backlog metrics.
  */
 export async function fetchQueueStatus(): Promise<QueueSnapshot> {
-  const res = await fetch(`${API_BASE}/queue/status`, {
+  const res = await fetch(`${getApiBase()}/queue/status`, {
     headers: buildHeaders(),
   });
   if (!res.ok) {
@@ -468,7 +482,7 @@ export async function analyzeRepository(
   branch: string;
   analysis: AnalysisResult;
 }> {
-  const res = await fetch(`${API_BASE}/analyze`, {
+  const res = await fetch(`${getApiBase()}/analyze`, {
     method: 'POST',
     headers: buildHeaders(true),
     body: JSON.stringify({ repoUrl, branch }),
@@ -501,7 +515,7 @@ export async function fetchDomainsAndCheckSubdomain(
   if (domain) params.set('domain', domain);
   const query = params.toString() ? `?${params.toString()}` : '';
 
-  const res = await fetch(`${API_BASE}/domains${query}`, {
+  const res = await fetch(`${getApiBase()}/domains${query}`, {
     headers: buildHeaders(),
   });
   if (!res.ok) {
@@ -545,7 +559,7 @@ export async function createStaticDeployment(payload: {
   customHostname: string | null;
   deployment: DeploymentRecord;
 }> {
-  const res = await fetch(`${API_BASE}/deploy`, {
+  const res = await fetch(`${getApiBase()}/deploy`, {
     method: 'POST',
     headers: buildHeaders(true),
     credentials: 'include',
@@ -593,7 +607,7 @@ export async function getDeploymentStatus(deploymentId: string): Promise<{
   customHostname: string | null;
   deployment: DeploymentRecord;
 }> {
-  const res = await fetch(`${API_BASE}/deploy/${encodeURIComponent(deploymentId)}`, {
+  const res = await fetch(`${getApiBase()}/deploy/${encodeURIComponent(deploymentId)}`, {
     headers: buildHeaders(),
     credentials: 'include',
   });
@@ -610,7 +624,7 @@ export async function getDeploymentStatus(deploymentId: string): Promise<{
 export async function listDeployments(): Promise<{
   deployments: DeploymentRecord[];
 }> {
-  const res = await fetch(`${API_BASE}/deployments`, {
+  const res = await fetch(`${getApiBase()}/deployments`, {
     headers: buildHeaders(),
     credentials: 'include',
   });
@@ -631,7 +645,7 @@ export async function deleteDeploymentInfrastructure(
   status: DeploymentStatus;
   deployment: DeploymentRecord;
 }> {
-  const res = await fetch(`${API_BASE}/deploy/${encodeURIComponent(deploymentId)}`, {
+  const res = await fetch(`${getApiBase()}/deploy/${encodeURIComponent(deploymentId)}`, {
     method: 'DELETE',
     headers: buildHeaders(),
     credentials: 'include',
@@ -669,7 +683,7 @@ export interface SecurityGuardrailsStatus {
  * GET /api/security/status
  */
 export async function fetchSecurityStatus(): Promise<SecurityGuardrailsStatus> {
-  const res = await fetch(`${API_BASE}/security/status`, {
+  const res = await fetch(`${getApiBase()}/security/status`, {
     headers: buildHeaders(),
   });
   if (!res.ok) {
@@ -702,7 +716,7 @@ export interface ObservabilityMetrics {
  * GET /api/observability/metrics
  */
 export async function fetchObservabilityMetrics(): Promise<ObservabilityMetrics> {
-  const res = await fetch(`${API_BASE}/observability/metrics`, {
+  const res = await fetch(`${getApiBase()}/observability/metrics`, {
     headers: buildHeaders(),
   });
   if (!res.ok) {
@@ -720,7 +734,7 @@ export async function retryFailedDeployment(deploymentId: string): Promise<{
   deployment: DeploymentRecord;
 }> {
   const res = await fetch(
-    `${API_BASE}/deploy/${encodeURIComponent(deploymentId)}/retry`,
+    `${getApiBase()}/deploy/${encodeURIComponent(deploymentId)}/retry`,
     {
       method: 'POST',
       headers: buildHeaders(),
@@ -752,7 +766,7 @@ export async function connectGitHubInstallation(params: {
     repositories: GitHubConnectedRepo[];
   };
 }> {
-  const res = await fetch(`${API_BASE}/github/installations`, {
+  const res = await fetch(`${getApiBase()}/github/installations`, {
     method: 'POST',
     headers: buildHeaders(true),
     credentials: 'include',
@@ -780,7 +794,7 @@ export async function fetchGitHubRepos(
   installationsCount: number;
 }> {
   const res = await fetch(
-    `${API_BASE}/github/repos?page=${page}&perPage=${perPage}`,
+    `${getApiBase()}/github/repos?page=${page}&perPage=${perPage}`,
     {
       headers: buildHeaders(),
       credentials: 'include',
@@ -801,7 +815,7 @@ export async function parseDotEnvPreview(dotEnvText: string): Promise<{
   count: number;
   entries: Array<{ key: string; value: string; maskedPreview: string }>;
 }> {
-  const res = await fetch(`${API_BASE}/secrets/parse-dotenv`, {
+  const res = await fetch(`${getApiBase()}/secrets/parse-dotenv`, {
     method: 'POST',
     headers: buildHeaders(true),
     credentials: 'include',
@@ -827,7 +841,7 @@ export async function rollbackProjectDeployment(
   previousDeploymentId: string | null;
 }> {
   const res = await fetch(
-    `${API_BASE}/projects/${encodeURIComponent(
+    `${getApiBase()}/projects/${encodeURIComponent(
       projectId
     )}/rollback/${encodeURIComponent(deploymentId)}`,
     {

@@ -94,6 +94,8 @@ export class DeploymentStore implements IDeploymentRepository {
   private readonly secretRedactions: Map<string, string[]> = new Map();
   public readonly events: EventEmitter = new EventEmitter();
 
+  private readonly isDefaultStore: boolean;
+
   constructor(customFilePath?: string) {
     this.events.setMaxListeners(100);
     const dataDir = path.resolve(__dirname, '../../data');
@@ -101,7 +103,11 @@ export class DeploymentStore implements IDeploymentRepository {
       fs.mkdirSync(dataDir, { recursive: true });
     }
     this.filePath = customFilePath || path.join(dataDir, 'deployments.json');
+    this.isDefaultStore = !customFilePath;
     this.db = this.loadFromDisk();
+    if (this.isDefaultStore && !fs.existsSync(this.filePath) && Object.keys(this.db.deployments).length > 0) {
+      this.saveToDisk();
+    }
 
     if (process.env.DYNAMODB_TABLE_NAME && process.env.AWS_DRY_RUN === 'false') {
       this.dynamoTableName = process.env.DYNAMODB_TABLE_NAME;
@@ -138,8 +144,19 @@ export class DeploymentStore implements IDeploymentRepository {
 
   private loadFromDisk(): PersistedDatabase {
     try {
-      if (fs.existsSync(this.filePath)) {
-        const raw = fs.readFileSync(this.filePath, 'utf-8');
+      let targetFile = this.filePath;
+      if (!fs.existsSync(targetFile) && this.isDefaultStore) {
+        const seedPath = path.resolve(__dirname, 'seedDeployments.json');
+        const altSeedPath = path.resolve(__dirname, '../../data/deployments.json');
+        if (fs.existsSync(seedPath)) {
+          targetFile = seedPath;
+        } else if (fs.existsSync(altSeedPath)) {
+          targetFile = altSeedPath;
+        }
+      }
+
+      if (fs.existsSync(targetFile)) {
+        const raw = fs.readFileSync(targetFile, 'utf-8');
         const parsed = JSON.parse(raw) as Partial<PersistedDatabase>;
         return {
           deployments: parsed.deployments || {},

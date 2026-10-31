@@ -23,6 +23,7 @@ RUN npm ci --omit=dev --workspace=backend
 
 COPY --from=builder /app/backend/dist ./backend/dist
 COPY --from=builder /app/frontend/out ./frontend/out
+COPY --from=builder /app/backend/src/store/seedDeployments.json ./backend/dist/store/seedDeployments.json
 
 EXPOSE 4000
 
