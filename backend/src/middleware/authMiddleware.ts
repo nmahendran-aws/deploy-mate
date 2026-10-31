@@ -79,10 +79,24 @@ export function createAuthMiddlewares(store: DeploymentStore = deploymentStore) 
       });
     }
 
-    const user = store.getUserById(verification.payload.sub);
+    let user = store.getUserById(verification.payload.sub);
+    if (!user && verification.payload.email) {
+      try {
+        // Self-heal: If token signature is cryptographically valid but user was lost across
+        // process restart or Lambda cold-start, rehydrate user identity and default workspace.
+        const session = authService.loginOrRegisterUser(
+          { email: verification.payload.email },
+          store
+        );
+        user = session.user;
+      } catch {
+        // Fall through to 401 if rehydration fails
+      }
+    }
+
     if (!user) {
       return res.status(401).json({
-        error: 'Authenticated user session no longer exists.',
+        error: 'Authenticated user session no longer exists. Please sign in again.',
         code: 'UNAUTHORIZED',
       });
     }

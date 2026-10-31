@@ -476,7 +476,11 @@ export default function Phase3DeployPage() {
       }
     } catch (err: unknown) {
       setIsDeploying(false);
-      setError(err instanceof Error ? err.message : 'Failed to start deployment');
+      const msg = err instanceof Error ? err.message : 'Failed to start deployment';
+      setError(msg);
+      if (msg.includes('session no longer exists') || msg.includes('Authentication required')) {
+        setAuthUser(null);
+      }
     }
   }
 

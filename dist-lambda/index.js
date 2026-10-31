@@ -25164,10 +25164,20 @@ function createAuthMiddlewares(store = deploymentStore) {
         code: "UNAUTHORIZED"
       });
     }
-    const user = store.getUserById(verification.payload.sub);
+    let user = store.getUserById(verification.payload.sub);
+    if (!user && verification.payload.email) {
+      try {
+        const session = authService.loginOrRegisterUser(
+          { email: verification.payload.email },
+          store
+        );
+        user = session.user;
+      } catch {
+      }
+    }
     if (!user) {
       return res.status(401).json({
-        error: "Authenticated user session no longer exists.",
+        error: "Authenticated user session no longer exists. Please sign in again.",
         code: "UNAUTHORIZED"
       });
     }
@@ -27046,6 +27056,205 @@ var GitHubAppService = class {
 };
 var githubAppService = new GitHubAppService();
 
+// backend/src/services/codeBuildService.ts
+var import_client_codebuild = require("@aws-sdk/client-codebuild");
+var CodeBuildService = class {
+  client;
+  projectName;
+  region;
+  constructor(projectName, region) {
+    this.region = region || process.env.AWS_REGION || "us-east-1";
+    this.projectName = projectName || process.env.CODEBUILD_PROJECT_NAME || "deploymate-build-worker";
+    this.client = new import_client_codebuild.CodeBuildClient({ region: this.region });
+  }
+  /**
+   * Generates a dynamic AWS CodeBuild buildspec.yml tailored to the application
+   * framework, deployment target, and artifact destination.
+   */
+  generateBuildspec(params) {
+    const { target, analysis, repoUrl, branch = "main", targetS3Bucket, targetS3Prefix, ecrRepositoryUri } = params;
+    const buildCmd = analysis.buildCommand || "npm run build";
+    const outputDir = analysis.outputDirectory || "dist";
+    if (target === "ECS_FARGATE" && ecrRepositoryUri) {
+      const ecrRegistry = ecrRepositoryUri.split("/")[0];
+      return `version: 0.2
+phases:
+  pre_build:
+    commands:
+      - echo "Logging in to Amazon ECR..."
+      - aws ecr get-login-password --region ${this.region} | docker login --username AWS --password-stdin ${ecrRegistry}
+      - echo "Cloning repository \${REPO_URL} (branch: ${branch})..."
+      - git clone --depth 1 --branch ${branch} \${REPO_URL} repo
+      - cd repo
+  build:
+    commands:
+      - echo "Building Docker image for linux/amd64..."
+      - docker build --platform=linux/amd64 -t ${ecrRepositoryUri} .
+  post_build:
+    commands:
+      - echo "Pushing Docker image to ECR (${ecrRepositoryUri})..."
+      - docker push ${ecrRepositoryUri}
+      - echo "Docker image successfully built and pushed."
+`;
+    }
+    if (targetS3Bucket) {
+      const prefix = targetS3Prefix ? `${targetS3Prefix.replace(/\/$/, "")}/` : "";
+      return `version: 0.2
+phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+    commands:
+      - echo "Preparing build environment..."
+      - git clone --depth 1 --branch ${branch} \${REPO_URL} repo
+      - cd repo
+      - npm ci || npm install
+  build:
+    commands:
+      - echo "Executing production build (${buildCmd})..."
+      - ${buildCmd}
+  post_build:
+    commands:
+      - echo "Syncing production assets to s3://${targetS3Bucket}/${prefix}..."
+      - aws s3 sync ${outputDir}/ s3://${targetS3Bucket}/${prefix} --delete
+      - echo "Build and upload completed successfully."
+`;
+    }
+    return `version: 0.2
+phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+    commands:
+      - git clone --depth 1 --branch ${branch} \${REPO_URL} repo
+      - cd repo
+      - npm ci || npm install
+  build:
+    commands:
+      - ${buildCmd}
+`;
+  }
+  /**
+   * Sanitizes environment variables so secret keys are not leaked or overridden dangerously.
+   */
+  sanitizeEnvironmentVariables(userEnvVars = {}) {
+    const list = [];
+    for (const [k, v] of Object.entries(userEnvVars)) {
+      const upper = k.toUpperCase();
+      if (upper.startsWith("AWS_") || upper.startsWith("GITHUB_") || upper === "PATH" || upper.startsWith("LD_")) {
+        continue;
+      }
+      list.push({ name: k, value: String(v), type: "PLAINTEXT" });
+    }
+    return list;
+  }
+  /**
+   * Executes an ephemeral, serverless isolated build in AWS CodeBuild.
+   * Free Tier: Covered under 100 build minutes/month for build.general1.small ($0.00 idle cost).
+   */
+  async executeBuild(params) {
+    const {
+      deploymentId,
+      repoUrl,
+      branch = "main",
+      target,
+      analysis,
+      userEnvVars = {},
+      targetS3Bucket,
+      targetS3Prefix,
+      ecrRepositoryUri,
+      dryRun = false,
+      onLog,
+      timeoutMinutes = 15
+    } = params;
+    const buildspec = this.generateBuildspec({
+      target,
+      analysis,
+      repoUrl,
+      branch,
+      targetS3Bucket,
+      targetS3Prefix,
+      ecrRepositoryUri
+    });
+    if (dryRun) {
+      onLog?.(
+        `[DryRun] AWS CodeBuild project "${this.projectName}" invoked for ${repoUrl} [target=${target}].`
+      );
+      onLog?.(
+        `[DryRun] Environment: Ubuntu 22.04 (Node.js 20, Docker in privilegedMode=true, compute=BUILD_GENERAL1_SMALL).`
+      );
+      onLog?.(
+        `[DryRun] Phases simulated: PROVISIONING -> DOWNLOAD_SOURCE -> INSTALL -> BUILD -> POST_BUILD -> SUCCEEDED in 42ms.`
+      );
+      return {
+        buildId: `${this.projectName}:mock-build-${deploymentId}`,
+        buildStatus: "SUCCEEDED",
+        durationSeconds: 1,
+        logsUrl: `https://${this.region}.console.aws.amazon.com/codesuite/codebuild/projects/${this.projectName}/build/mock-${deploymentId}`,
+        artifactS3Uri: targetS3Bucket ? `s3://${targetS3Bucket}/${targetS3Prefix || ""}` : void 0,
+        ecrImageUri: ecrRepositoryUri
+      };
+    }
+    onLog?.(
+      `Phase 2: Launching ephemeral AWS CodeBuild worker (Project: ${this.projectName}, Compute: BUILD_GENERAL1_SMALL, Privileged=true)...`
+    );
+    const envVars = [
+      { name: "REPO_URL", value: repoUrl, type: "PLAINTEXT" },
+      { name: "DEPLOYMENT_ID", value: deploymentId, type: "PLAINTEXT" },
+      { name: "NODE_ENV", value: "production", type: "PLAINTEXT" },
+      ...this.sanitizeEnvironmentVariables(userEnvVars)
+    ];
+    const startCmd = new import_client_codebuild.StartBuildCommand({
+      projectName: this.projectName,
+      buildspecOverride: buildspec,
+      environmentVariablesOverride: envVars,
+      timeoutInMinutesOverride: timeoutMinutes
+    });
+    const startRes = await this.client.send(startCmd);
+    const buildId = startRes.build?.id;
+    if (!buildId) {
+      throw new Error(`Failed to initiate AWS CodeBuild build: no build ID returned.`);
+    }
+    onLog?.(`AWS CodeBuild worker running: ${buildId}`);
+    const startTime = Date.now();
+    const maxPollMs = timeoutMinutes * 60 * 1e3;
+    let buildObj;
+    while (Date.now() - startTime < maxPollMs) {
+      await new Promise((resolve) => setTimeout(resolve, 5e3));
+      const batchRes = await this.client.send(
+        new import_client_codebuild.BatchGetBuildsCommand({ ids: [buildId] })
+      );
+      buildObj = batchRes.builds?.[0];
+      if (!buildObj) continue;
+      const currentPhase = buildObj.currentPhase || "IN_PROGRESS";
+      const status = buildObj.buildStatus;
+      onLog?.(`CodeBuild [${buildId}] Phase: ${currentPhase} (Status: ${status || "IN_PROGRESS"})`);
+      if (status && status !== "IN_PROGRESS") {
+        break;
+      }
+    }
+    const finalStatus = buildObj?.buildStatus || "TIMED_OUT";
+    const durationSeconds = Math.round((Date.now() - startTime) / 1e3);
+    const logsUrl = buildObj?.logs?.deepLink;
+    if (finalStatus !== "SUCCEEDED") {
+      const phaseFail = buildObj?.phases?.find((p) => p.phaseStatus === "FAILED");
+      const errorDetail = phaseFail ? `Phase "${phaseFail.phaseType}" failed: ${phaseFail.contexts?.[0]?.message || "Unknown error"}` : `Build ended with status: ${finalStatus}`;
+      onLog?.(`AWS CodeBuild failed: ${errorDetail}`);
+      throw new Error(`AWS CodeBuild failed (${finalStatus}): ${errorDetail}`);
+    }
+    onLog?.(`AWS CodeBuild completed successfully in ${durationSeconds}s.`);
+    return {
+      buildId,
+      buildStatus: "SUCCEEDED",
+      durationSeconds,
+      logsUrl,
+      artifactS3Uri: targetS3Bucket ? `s3://${targetS3Bucket}/${targetS3Prefix || ""}` : void 0,
+      ecrImageUri: ecrRepositoryUri
+    };
+  }
+};
+var codeBuildService = new CodeBuildService();
+
 // backend/src/services/isolatedBuilder.ts
 var IsolatedBuildRunner = class {
   buildRoot;
@@ -27058,6 +27267,12 @@ var IsolatedBuildRunner = class {
     if (!import_fs3.default.existsSync(this.buildRoot)) {
       import_fs3.default.mkdirSync(this.buildRoot, { recursive: true });
     }
+  }
+  getBuildEngine() {
+    if (process.env.BUILD_ENGINE === "codebuild" || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+      return "codebuild";
+    }
+    return "local";
   }
   /**
    * Creates a stripped environment for untrusted repository builds.
@@ -27198,14 +27413,26 @@ var IsolatedBuildRunner = class {
     const sanitizedEnv = this.createSanitizedWorkerEnv(params.userEnvVars, params.repoDir);
     const nodeExec = process.execPath;
     const npmCli = import_path4.default.join(import_path4.default.dirname(nodeExec), "npm");
+    const buildEngine = this.getBuildEngine();
     log(
-      `Isolated build worker initialized (timeout=${Math.round(
+      `Isolated build worker initialized (engine=${buildEngine}, timeout=${Math.round(
         this.maxBuildDurationMs / 1e3
       )}s, awsCredentialsExposed=false, dockerIsolation=${this.useDockerIsolation}).`
     );
     const outSubdir = params.analysis.outputDirectory || "dist";
     const artifactDir = outSubdir === "." ? params.repoDir : import_path4.default.join(params.repoDir, outSubdir);
-    if (params.clonedFromRemote && !params.dryRun) {
+    if (buildEngine === "codebuild" && params.clonedFromRemote && !params.dryRun) {
+      log("Offloading build execution to ephemeral AWS CodeBuild worker (Project: deploymate-build-worker, Zero-Idle-Cost)...");
+      await codeBuildService.executeBuild({
+        deploymentId: params.deploymentId,
+        repoUrl: params.repoUrl,
+        target: params.analysis.recommendedTarget || "S3_CLOUDFRONT",
+        analysis: params.analysis,
+        userEnvVars: params.userEnvVars,
+        dryRun: false,
+        onLog: log
+      });
+    } else if (params.clonedFromRemote && !params.dryRun) {
       if (this.useDockerIsolation) {
         log("Running build inside ephemeral Docker container (--cap-drop=ALL --security-opt=no-new-privileges)...");
         const buildCmd = params.analysis.buildCommand || "npm run build";
@@ -28261,9 +28488,60 @@ var EcsFargateDeployer = class {
       }
     }
     if (ecsServiceName && ecsClusterName) {
-      onLog(
-        `Cleaned up ECS Fargate service "${ecsServiceName}" on cluster "${ecsClusterName}".`
-      );
+      try {
+        await this.signedAwsJsonRequest({
+          service: "ecs",
+          region,
+          host: `ecs.${region}.amazonaws.com`,
+          amzTarget: "AmazonEC2ContainerServiceV20141113.UpdateService",
+          body: {
+            cluster: ecsClusterName,
+            service: ecsServiceName,
+            desiredCount: 0
+          }
+        });
+        onLog(`Scaled down ECS Fargate service "${ecsServiceName}" to 0 desired tasks.`);
+      } catch {
+      }
+      try {
+        await this.signedAwsJsonRequest({
+          service: "ecs",
+          region,
+          host: `ecs.${region}.amazonaws.com`,
+          amzTarget: "AmazonEC2ContainerServiceV20141113.DeleteService",
+          body: {
+            cluster: ecsClusterName,
+            service: ecsServiceName,
+            force: true
+          }
+        });
+        onLog(`Deleted ECS Fargate service "${ecsServiceName}" on cluster "${ecsClusterName}".`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        onLog(`Notice deleting ECS service "${ecsServiceName}": ${msg}`);
+      }
+    }
+    const albArn = process.env.ECS_ALB_ARN;
+    if (albArn) {
+      try {
+        (0, import_child_process2.execSync)(`aws elbv2 delete-load-balancer --load-balancer-arn "${albArn}" --region ${region}`, {
+          stdio: "pipe",
+          timeout: 3e4
+        });
+        onLog(`Deprovisioned Application Load Balancer (${albArn}).`);
+      } catch (err) {
+      }
+    }
+    const tgArn = process.env.ECS_TARGET_GROUP_ARN || albTargetGroupArn;
+    if (tgArn && !tgArn.includes("123456789012")) {
+      try {
+        (0, import_child_process2.execSync)(`aws elbv2 delete-target-group --target-group-arn "${tgArn}" --region ${region}`, {
+          stdio: "pipe",
+          timeout: 3e4
+        });
+        onLog(`Deprovisioned ALB Target Group (${tgArn}).`);
+      } catch (err) {
+      }
     }
   }
   /**

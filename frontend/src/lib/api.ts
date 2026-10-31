@@ -591,6 +591,9 @@ export async function createStaticDeployment(payload: {
 
   const data = await res.json();
   if (!res.ok) {
+    if (res.status === 401) {
+      setStoredSession(null);
+    }
     const detail = data.remediation ? ` — ${data.remediation}` : '';
     throw new Error(`${data.error || 'Failed to start deployment'}${detail}`);
   }
