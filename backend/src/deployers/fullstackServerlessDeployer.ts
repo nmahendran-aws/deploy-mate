@@ -539,6 +539,7 @@ export class FullstackServerlessDeployer implements IDeployer {
           const disabledConfig = {
             ...getRes.Distribution.DistributionConfig,
             Enabled: false,
+            Aliases: { Quantity: 0 },
           };
           const updateRes = await cloudfront.send(
             new UpdateDistributionCommand({
