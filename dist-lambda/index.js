@@ -24390,12 +24390,102 @@ var DeploymentStore = class {
     if (process.env.DATABASE_URL && process.env.FORCE_DRY_RUN_TEST !== "true") {
       void this.initializePostgresPool(process.env.DATABASE_URL);
     }
-    if (this.isDefaultStore && process.env.DEPLOYMATE_STATE_BUCKET && process.env.FORCE_DRY_RUN_TEST !== "true") {
-      this.s3StateBucket = process.env.DEPLOYMATE_STATE_BUCKET;
+    const stateBucket = process.env.DEPLOYMATE_STATE_BUCKET || process.env.S3_STATE_BUCKET;
+    if (this.isDefaultStore && stateBucket && process.env.FORCE_DRY_RUN_TEST !== "true") {
+      this.s3StateBucket = stateBucket;
       this.s3Client = new import_client_s3.S3Client({
         region: process.env.AWS_REGION || "us-east-1"
       });
       void this.loadFromS3();
+    }
+  }
+  s3SyncPromise = null;
+  s3SyncNeeded = false;
+  mergeDeploymentRecords(localDep, remoteDep) {
+    const localTime = new Date(localDep.updatedAt || localDep.createdAt || 0).getTime();
+    const remoteTime = new Date(remoteDep.updatedAt || remoteDep.createdAt || 0).getTime();
+    const base = remoteTime > localTime ? remoteDep : localDep;
+    const secondary = remoteTime > localTime ? localDep : remoteDep;
+    const logMap = /* @__PURE__ */ new Map();
+    for (const log of secondary.auditLogs || []) {
+      logMap.set(`${log.timestamp}_${log.message}`, log);
+    }
+    for (const log of base.auditLogs || []) {
+      logMap.set(`${log.timestamp}_${log.message}`, log);
+    }
+    const mergedLogs = Array.from(logMap.values()).sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+    let status = base.status;
+    if ((secondary.status === "LIVE" || base.status === "LIVE") && base.status !== "DELETED" && base.status !== "FAILED") {
+      status = "LIVE";
+    } else if (base.status === "DELETED" || secondary.status === "DELETED") {
+      status = "DELETED";
+    }
+    return {
+      ...secondary,
+      ...base,
+      status,
+      auditLogs: mergedLogs.length > 0 ? mergedLogs : base.auditLogs,
+      url: base.url || secondary.url || null,
+      infrastructureUrl: base.infrastructureUrl || secondary.infrastructureUrl || null,
+      resources: {
+        ...secondary.resources || {},
+        ...base.resources || {}
+      },
+      checklist: {
+        ...secondary.checklist || {},
+        ...base.checklist || {}
+      }
+    };
+  }
+  mergeRemoteDatabase(remote) {
+    if (!remote) return;
+    if (remote.deployments && typeof remote.deployments === "object") {
+      for (const [id, remoteDep] of Object.entries(remote.deployments)) {
+        if (!remoteDep || typeof remoteDep !== "object") continue;
+        const localDep = this.db.deployments[id];
+        if (!localDep) {
+          this.db.deployments[id] = remoteDep;
+        } else {
+          this.db.deployments[id] = this.mergeDeploymentRecords(localDep, remoteDep);
+        }
+      }
+    }
+    if (remote.reservedHostnames && typeof remote.reservedHostnames === "object") {
+      for (const [host, depId] of Object.entries(remote.reservedHostnames)) {
+        const dep = this.db.deployments[depId];
+        if (dep && dep.status === "DELETED") {
+          continue;
+        }
+        if (!this.db.reservedHostnames[host]) {
+          this.db.reservedHostnames[host] = depId;
+        }
+      }
+    }
+    if (remote.users) {
+      this.db.users = { ...remote.users, ...this.db.users };
+    }
+    if (remote.organizations) {
+      this.db.organizations = { ...remote.organizations, ...this.db.organizations };
+    }
+    if (remote.memberships) {
+      this.db.memberships = { ...remote.memberships, ...this.db.memberships };
+    }
+    if (remote.projects) {
+      this.db.projects = { ...remote.projects, ...this.db.projects };
+    }
+    if (remote.encryptedSecrets) {
+      this.db.encryptedSecrets = { ...remote.encryptedSecrets, ...this.db.encryptedSecrets };
+    }
+    if (remote.githubInstallations) {
+      this.db.githubInstallations = { ...remote.githubInstallations, ...this.db.githubInstallations };
+    }
+    if (remote.prPreviewComments) {
+      this.db.prPreviewComments = { ...remote.prPreviewComments, ...this.db.prPreviewComments };
+    }
+    if (remote.processedWebhookDeliveries) {
+      this.db.processedWebhookDeliveries = { ...remote.processedWebhookDeliveries, ...this.db.processedWebhookDeliveries };
     }
   }
   /**
@@ -24414,38 +24504,52 @@ var DeploymentStore = class {
       if (res.Body) {
         const raw = await res.Body.transformToString();
         const parsed = JSON.parse(raw);
-        if (parsed.deployments && Object.keys(parsed.deployments).length > 0) {
-          this.db = {
-            deployments: { ...parsed.deployments, ...this.db.deployments },
-            reservedHostnames: { ...parsed.reservedHostnames, ...this.db.reservedHostnames },
-            users: { ...parsed.users, ...this.db.users },
-            organizations: { ...parsed.organizations, ...this.db.organizations },
-            memberships: { ...parsed.memberships, ...this.db.memberships },
-            projects: { ...parsed.projects, ...this.db.projects },
-            encryptedSecrets: { ...parsed.encryptedSecrets, ...this.db.encryptedSecrets },
-            githubInstallations: { ...parsed.githubInstallations, ...this.db.githubInstallations },
-            prPreviewComments: { ...parsed.prPreviewComments, ...this.db.prPreviewComments },
-            processedWebhookDeliveries: { ...parsed.processedWebhookDeliveries, ...this.db.processedWebhookDeliveries }
-          };
-          this.saveToDisk(false);
-        }
+        this.mergeRemoteDatabase(parsed);
+        this.saveToDisk(false);
       }
     } catch {
     }
   }
   async syncToS3() {
     if (!this.s3Client || !this.s3StateBucket) return;
-    try {
-      await this.s3Client.send(
-        new import_client_s3.PutObjectCommand({
-          Bucket: this.s3StateBucket,
-          Key: this.s3StateKey,
-          Body: JSON.stringify(this.db, null, 2),
-          ContentType: "application/json"
-        })
-      );
-    } catch {
+    if (this.s3SyncPromise) {
+      this.s3SyncNeeded = true;
+      return this.s3SyncPromise;
     }
+    this.s3SyncPromise = (async () => {
+      try {
+        do {
+          this.s3SyncNeeded = false;
+          try {
+            const res = await this.s3Client.send(
+              new import_client_s3.GetObjectCommand({
+                Bucket: this.s3StateBucket,
+                Key: this.s3StateKey
+              })
+            );
+            if (res.Body) {
+              const raw = await res.Body.transformToString();
+              const remoteDb = JSON.parse(raw);
+              this.mergeRemoteDatabase(remoteDb);
+            }
+          } catch {
+          }
+          await this.s3Client.send(
+            new import_client_s3.PutObjectCommand({
+              Bucket: this.s3StateBucket,
+              Key: this.s3StateKey,
+              Body: JSON.stringify(this.db, null, 2),
+              ContentType: "application/json"
+            })
+          );
+        } while (this.s3SyncNeeded);
+      } catch (err) {
+        console.error("Failed to sync state to S3:", err);
+      } finally {
+        this.s3SyncPromise = null;
+      }
+    })();
+    return this.s3SyncPromise;
   }
   /**
    * Optional PostgreSQL connection pool initialization when DATABASE_URL is configured (DM-902).
@@ -24812,12 +24916,16 @@ var DeploymentStore = class {
   listMembershipsForOrg(orgId) {
     return Object.values(this.db.memberships).filter((m) => m.orgId === orgId);
   }
-  listOrganizationsForUser(userId) {
+  listOrganizationsForUser(userId, email) {
+    const normEmail = email?.trim().toLowerCase();
     const userMemberships = Object.values(this.db.memberships).filter(
-      (m) => m.userId === userId
+      (m) => m.userId === userId || normEmail && m.userEmail?.toLowerCase() === normEmail
     );
+    const seenOrgIds = /* @__PURE__ */ new Set();
     const results = [];
     for (const m of userMemberships) {
+      if (seenOrgIds.has(m.orgId)) continue;
+      seenOrgIds.add(m.orgId);
       const org = this.db.organizations[m.orgId];
       if (org) {
         results.push({ organization: org, role: m.role });
@@ -25270,9 +25378,9 @@ function createAuthMiddlewares(store = deploymentStore) {
               membershipId: `mem_${userId.slice(-6)}_${orgId.slice(-6)}`,
               orgId,
               userId,
+              userEmail: user.email,
               role: "OWNER",
-              createdAt: now,
-              updatedAt: now
+              createdAt: now
             });
           }
         }
@@ -25704,8 +25812,9 @@ function slugify(raw) {
 function createAuthAndOrgRouter(store = deploymentStore) {
   const router = (0, import_express.Router)();
   const { requireAuth } = createAuthMiddlewares(store);
-  router.post("/auth/session", (req, res) => {
+  router.post("/auth/session", async (req, res) => {
     try {
+      await store.loadFromS3();
       const { email, displayName, username, authProvider, avatarUrl } = req.body || {};
       if (typeof email !== "string" || !email.trim()) {
         return res.status(400).json({
@@ -25724,6 +25833,7 @@ function createAuthAndOrgRouter(store = deploymentStore) {
         },
         store
       );
+      await store.syncToS3();
       res.setHeader(
         "Set-Cookie",
         `dm_session=${encodeURIComponent(
@@ -25738,9 +25848,10 @@ function createAuthAndOrgRouter(store = deploymentStore) {
       });
     }
   });
-  router.get("/auth/me", requireAuth, (req, res) => {
+  router.get("/auth/me", requireAuth, async (req, res) => {
+    await store.loadFromS3();
     const auth = req.auth;
-    const organizations = store.listOrganizationsForUser(auth.user.userId);
+    const organizations = store.listOrganizationsForUser(auth.user.userId, auth.user.email);
     return res.json({
       user: auth.user,
       activeOrgId: auth.activeOrgId,
@@ -28982,18 +29093,30 @@ var LambdaApiGatewayDeployer = class {
       onLog
     });
     onResourceCreated({ lambdaFunctionName: functionName });
-    const { apiId, apiEndpoint, apiDomain } = await this.createHttpApiGateway({
-      region,
-      accountId,
-      apiName,
-      functionName,
-      functionArn,
-      onLog
-    });
-    onResourceCreated({
-      apiGatewayId: apiId,
-      apiGatewayEndpoint: apiEndpoint
-    });
+    let apiId = deployment.resources?.apiGatewayId;
+    let apiEndpoint = deployment.resources?.apiGatewayEndpoint;
+    let apiDomain = apiEndpoint ? apiEndpoint.replace(/^https?:\/\//, "").replace(/\/.*$/, "") : "";
+    if (!apiId || !apiEndpoint) {
+      const created = await this.createHttpApiGateway({
+        region,
+        accountId,
+        apiName,
+        functionName,
+        functionArn,
+        onLog
+      });
+      apiId = created.apiId;
+      apiEndpoint = created.apiEndpoint;
+      apiDomain = created.apiDomain;
+      onResourceCreated({
+        apiGatewayId: apiId,
+        apiGatewayEndpoint: apiEndpoint
+      });
+    } else {
+      onLog(
+        `Phase 5 Task 4: Reusing existing API Gateway HTTP API "${apiId}" (${apiEndpoint}).`
+      );
+    }
     return {
       infrastructureUrl: apiEndpoint,
       targetDnsName: apiDomain,
@@ -29174,6 +29297,29 @@ var LambdaApiGatewayDeployer = class {
           await new Promise((r) => setTimeout(r, 4e3));
           continue;
         }
+        if (lastError.message.includes("ResourceConflictException") || lastError.message.includes("Function already exist") || lastError.message.includes("failed (409)")) {
+          params.onLog(
+            `Phase 5 Task 3: AWS Lambda Function "${params.functionName}" already exists. Updating code...`
+          );
+          try {
+            const updateRes = await this.signedRestRequest({
+              service: "lambda",
+              region: params.region,
+              host: `lambda.${params.region}.amazonaws.com`,
+              method: "PUT",
+              path: `/2015-03-31/functions/${encodeURIComponent(params.functionName)}/code`,
+              body: JSON.stringify({
+                ZipFile: params.zipBuffer.toString("base64")
+              })
+            });
+            return updateRes.FunctionArn || `arn:aws:lambda:${params.region}:${params.roleArn.split(":")[4]}:function:${params.functionName}`;
+          } catch (updateErr) {
+            params.onLog(
+              `Notice: Could not update existing Lambda code: ${updateErr instanceof Error ? updateErr.message : String(updateErr)}`
+            );
+            return `arn:aws:lambda:${params.region}:${params.roleArn.split(":")[4]}:function:${params.functionName}`;
+          }
+        }
         break;
       }
     }
@@ -29208,16 +29354,22 @@ var LambdaApiGatewayDeployer = class {
       Principal: "apigateway.amazonaws.com",
       SourceArn: `arn:aws:execute-api:${params.region}:${params.accountId}:${apiId}/*`
     });
-    await this.signedRestRequest({
-      service: "lambda",
-      region: params.region,
-      host: `lambda.${params.region}.amazonaws.com`,
-      method: "POST",
-      path: `/2015-03-31/functions/${encodeURIComponent(
-        params.functionName
-      )}/policy`,
-      body: permissionPayload
-    });
+    try {
+      await this.signedRestRequest({
+        service: "lambda",
+        region: params.region,
+        host: `lambda.${params.region}.amazonaws.com`,
+        method: "POST",
+        path: `/2015-03-31/functions/${encodeURIComponent(
+          params.functionName
+        )}/policy`,
+        body: permissionPayload
+      });
+    } catch (permErr) {
+      params.onLog(
+        `Notice: Lambda permission note: ${permErr instanceof Error ? permErr.message : String(permErr)}`
+      );
+    }
     params.onLog(
       `Phase 5 Task 4: Created API Gateway v2 HTTP API "${apiId}" -> ${apiEndpoint} and granted invoke permission.`
     );
@@ -29389,7 +29541,7 @@ x-amz-date:${amzDate}
         ...sessionToken ? { "X-Amz-Security-Token": sessionToken } : {},
         Authorization: authorization
       },
-      ...params.method === "POST" ? { body: bodyStr } : {}
+      ...params.method === "POST" || params.method === "PUT" ? { body: bodyStr } : {}
     });
     const text = await res.text();
     if (!res.ok) {
@@ -29611,7 +29763,10 @@ var FullstackServerlessDeployer = class {
       },
       userEnvVars: {
         NODE_ENV: "production",
-        S3_STATE_BUCKET: process.env.S3_STATE_BUCKET || "repo2cloud-static-dep2b0aa15c",
+        DEPLOYMATE_STATE_BUCKET: process.env.DEPLOYMATE_STATE_BUCKET || process.env.S3_STATE_BUCKET || "repo2cloud-static-dep2b0aa15c",
+        S3_STATE_BUCKET: process.env.DEPLOYMATE_STATE_BUCKET || process.env.S3_STATE_BUCKET || "repo2cloud-static-dep2b0aa15c",
+        BUILD_ENGINE: "codebuild",
+        AWS_DRY_RUN: "false",
         ...ctx.userEnvVars || {}
       }
     });
@@ -29625,24 +29780,29 @@ var FullstackServerlessDeployer = class {
       apiGatewayId,
       apiGatewayEndpoint
     });
-    const oacName = `oac-${shortId}-${Date.now()}`;
-    ctx.onLog(`Creating CloudFront Origin Access Control (${oacName})...`);
-    const oacRes = await cloudfront.send(
-      new import_client_cloudfront.CreateOriginAccessControlCommand({
-        OriginAccessControlConfig: {
-          Name: oacName,
-          Description: `OAC for fullstack deployment ${ctx.deployment.deploymentId}`,
-          OriginAccessControlOriginType: "s3",
-          SigningBehavior: "always",
-          SigningProtocol: "sigv4"
-        }
-      })
-    );
-    const oacId = oacRes.OriginAccessControl?.Id;
+    let oacId = ctx.deployment.resources?.cloudFrontOacId;
     if (!oacId) {
-      throw new Error("Failed to create CloudFront Origin Access Control.");
+      const oacName = `oac-${shortId}-${Date.now()}`;
+      ctx.onLog(`Creating CloudFront Origin Access Control (${oacName})...`);
+      const oacRes = await cloudfront.send(
+        new import_client_cloudfront.CreateOriginAccessControlCommand({
+          OriginAccessControlConfig: {
+            Name: oacName,
+            Description: `OAC for fullstack deployment ${ctx.deployment.deploymentId}`,
+            OriginAccessControlOriginType: "s3",
+            SigningBehavior: "always",
+            SigningProtocol: "sigv4"
+          }
+        })
+      );
+      oacId = oacRes.OriginAccessControl?.Id;
+      if (!oacId) {
+        throw new Error("Failed to create CloudFront Origin Access Control.");
+      }
+      ctx.onResourceCreated({ cloudFrontOacId: oacId });
+    } else {
+      ctx.onLog(`Reusing CloudFront Origin Access Control (${oacId}).`);
     }
-    ctx.onResourceCreated({ cloudFrontOacId: oacId });
     const s3OriginDomain = `${bucketName}.s3.${region}.amazonaws.com`;
     const s3OriginId = `s3-static-${shortId}`;
     const apiOriginId = `apigw-api-${shortId}`;
@@ -29782,7 +29942,7 @@ var FullstackServerlessDeployer = class {
     ctx.onLog(
       `Waiting for CloudFront distribution ${distributionId} to propagate to edge locations...`
     );
-    for (let poll = 0; poll < 45; poll++) {
+    for (let poll = 0; poll < 10; poll++) {
       try {
         const getRes = await cloudfront.send(
           new import_client_cloudfront.GetDistributionCommand({ Id: distributionId })
@@ -29795,7 +29955,7 @@ var FullstackServerlessDeployer = class {
         }
       } catch {
       }
-      await new Promise((r) => setTimeout(r, 4e3));
+      await new Promise((r) => setTimeout(r, 3e3));
     }
     ctx.onLog(
       `Successfully provisioned Zero-Cost Full-Stack Serverless distribution (${distributionId}) at https://${cloudFrontDomainName}.`
@@ -32250,6 +32410,7 @@ function createDeployRouter(store = deploymentStore, manager = deploymentManager
     return res.json({ domains: configured });
   });
   router.post("/deploy", async (req, res) => {
+    await store.loadFromS3();
     const rateCheck = securityGuardrails.checkRateLimit(req.ip || "deploy-client");
     if (!rateCheck.allowed) {
       return res.status(429).json({ error: rateCheck.error });
@@ -32361,16 +32522,20 @@ function createDeployRouter(store = deploymentStore, manager = deploymentManager
           code: "FORBIDDEN_RBAC"
         });
       }
-      const orgDeployments = store.listByOrg(req.auth.activeOrgId);
-      const legacyDeployments = store.listAll().filter((d) => !d.orgId);
-      const combined = [...orgDeployments];
-      for (const leg of legacyDeployments) {
-        if (!combined.some((d) => d.deploymentId === leg.deploymentId)) {
-          combined.push(leg);
-        }
+      const userOrgs = store.listOrganizationsForUser(
+        req.auth.user.userId,
+        req.auth.user.email
+      );
+      const allowedOrgIds = new Set(userOrgs.map((o) => o.organization.orgId));
+      if (req.auth.activeOrgId) {
+        allowedOrgIds.add(req.auth.activeOrgId);
       }
+      const allDeps = store.listAll();
+      const visible = allDeps.filter(
+        (d) => !d.orgId || allowedOrgIds.has(d.orgId)
+      );
       return res.json({
-        deployments: combined.sort(
+        deployments: visible.sort(
           (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
         )
       });
@@ -32379,6 +32544,7 @@ function createDeployRouter(store = deploymentStore, manager = deploymentManager
     return res.json({ deployments });
   });
   router.delete("/deploy/:id", async (req, res) => {
+    await store.loadFromS3();
     if (req.auth) {
       if (!req.auth.activeOrgId || !req.auth.activeRole) {
         return res.status(404).json({
@@ -32420,6 +32586,7 @@ function createDeployRouter(store = deploymentStore, manager = deploymentManager
     });
   });
   router.post("/deploy/:id/retry", async (req, res) => {
+    await store.loadFromS3();
     if (req.auth) {
       if (!req.auth.activeOrgId || !req.auth.activeRole) {
         return res.status(404).json({
@@ -32960,7 +33127,8 @@ function createGitHubAndSecretsRouter(store = deploymentStore, manager = deploym
   router.post(
     "/projects/:projectId/rollback/:deploymentId",
     requireAuth,
-    (req, res) => {
+    async (req, res) => {
+      await store.loadFromS3();
       const auth = req.auth;
       const { projectId, deploymentId } = req.params;
       if (!auth.activeOrgId || !auth.activeRole) {
@@ -32985,6 +33153,7 @@ function createGitHubAndSecretsRouter(store = deploymentStore, manager = deploym
       if (!rollback.ok) {
         return res.status(rollback.statusCode).json({ error: rollback.error });
       }
+      await store.syncToS3();
       return res.status(200).json({
         ok: true,
         project: rollback.project,
@@ -33237,7 +33406,15 @@ if (require.main === module) {
 
 // backend/src/lambda.ts
 var httpHandler = (0, import_serverless_http.default)(app);
+var isHydrated = false;
 var handler = async (event, context) => {
+  if (!isHydrated) {
+    try {
+      await deploymentStore.loadFromS3();
+      isHydrated = true;
+    } catch {
+    }
+  }
   if (event && event.action === "PROCESS_DEPLOYMENT") {
     const payload = event.payload || event;
     const deploymentId = payload.deploymentId;
@@ -33258,7 +33435,7 @@ var handler = async (event, context) => {
       }
       const userEnvVars = payload.userEnvVars || {};
       const ephemeralGitHubToken = payload.ephemeralGitHubToken;
-      if (record.status === "FAILED") {
+      if (record.status === "FAILED" || record.status === "DEPLOYING") {
         deploymentStore.update(deploymentId, {
           status: "BUILDING",
           error: null

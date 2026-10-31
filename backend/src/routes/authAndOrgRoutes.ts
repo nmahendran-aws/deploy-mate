@@ -57,8 +57,9 @@ export function createAuthAndOrgRouter(
    * Authenticates a user via GitHub / Google / Email identity, detects .edu academic domains,
    * provisions a default Personal Workspace + OWNER membership on first sign-in, and issues an HttpOnly JWT session.
    */
-  router.post('/auth/session', (req: Request, res: Response) => {
+  router.post('/auth/session', async (req: Request, res: Response) => {
     try {
+      await store.loadFromS3();
       const { email, displayName, username, authProvider, avatarUrl } = req.body || {};
       if (typeof email !== 'string' || !email.trim()) {
         return res.status(400).json({
@@ -82,6 +83,7 @@ export function createAuthAndOrgRouter(
         },
         store
       );
+      await store.syncToS3();
 
       res.setHeader(
         'Set-Cookie',
@@ -103,9 +105,10 @@ export function createAuthAndOrgRouter(
    * GET /api/auth/me
    * Returns current authenticated user, .edu student verification badge, active org, and RBAC role.
    */
-  router.get('/auth/me', requireAuth, (req: Request, res: Response) => {
+  router.get('/auth/me', requireAuth, async (req: Request, res: Response) => {
+    await store.loadFromS3();
     const auth = req.auth!;
-    const organizations = store.listOrganizationsForUser(auth.user.userId);
+    const organizations = store.listOrganizationsForUser(auth.user.userId, auth.user.email);
     return res.json({
       user: auth.user,
       activeOrgId: auth.activeOrgId,

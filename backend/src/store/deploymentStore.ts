@@ -143,6 +143,115 @@ export class DeploymentStore implements IDeploymentRepository {
     }
   }
 
+  private s3SyncPromise: Promise<void> | null = null;
+  private s3SyncNeeded = false;
+
+  private mergeDeploymentRecords(
+    localDep: DeploymentRecord,
+    remoteDep: DeploymentRecord
+  ): DeploymentRecord {
+    const localTime = new Date(localDep.updatedAt || localDep.createdAt || 0).getTime();
+    const remoteTime = new Date(remoteDep.updatedAt || remoteDep.createdAt || 0).getTime();
+
+    // Prefer whichever has the more recent update
+    const base = remoteTime > localTime ? remoteDep : localDep;
+    const secondary = remoteTime > localTime ? localDep : remoteDep;
+
+    // Merge audit logs by timestamp & message so logs aren't lost from either source
+    const logMap = new Map<string, AuditLogEntry>();
+    for (const log of secondary.auditLogs || []) {
+      logMap.set(`${log.timestamp}_${log.message}`, log);
+    }
+    for (const log of base.auditLogs || []) {
+      logMap.set(`${log.timestamp}_${log.message}`, log);
+    }
+    const mergedLogs = Array.from(logMap.values()).sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+
+    // If one is LIVE and the other is not, and base is not DELETED or explicitly FAILED with newer timestamp:
+    let status = base.status;
+    if (
+      (secondary.status === 'LIVE' || base.status === 'LIVE') &&
+      base.status !== 'DELETED' &&
+      base.status !== 'FAILED'
+    ) {
+      status = 'LIVE';
+    } else if (base.status === 'DELETED' || secondary.status === 'DELETED') {
+      status = 'DELETED';
+    }
+
+    return {
+      ...secondary,
+      ...base,
+      status,
+      auditLogs: mergedLogs.length > 0 ? mergedLogs : base.auditLogs,
+      url: base.url || secondary.url || null,
+      infrastructureUrl: base.infrastructureUrl || secondary.infrastructureUrl || null,
+      resources: {
+        ...(secondary.resources || {}),
+        ...(base.resources || {}),
+      },
+      checklist: {
+        ...(secondary.checklist || {}),
+        ...(base.checklist || {}),
+      },
+    };
+  }
+
+  public mergeRemoteDatabase(remote: Partial<PersistedDatabase>): void {
+    if (!remote) return;
+
+    if (remote.deployments && typeof remote.deployments === 'object') {
+      for (const [id, remoteDep] of Object.entries(remote.deployments)) {
+        if (!remoteDep || typeof remoteDep !== 'object') continue;
+        const localDep = this.db.deployments[id];
+        if (!localDep) {
+          this.db.deployments[id] = remoteDep;
+        } else {
+          this.db.deployments[id] = this.mergeDeploymentRecords(localDep, remoteDep);
+        }
+      }
+    }
+
+    if (remote.reservedHostnames && typeof remote.reservedHostnames === 'object') {
+      for (const [host, depId] of Object.entries(remote.reservedHostnames)) {
+        const dep = this.db.deployments[depId];
+        if (dep && dep.status === 'DELETED') {
+          continue;
+        }
+        if (!this.db.reservedHostnames[host]) {
+          this.db.reservedHostnames[host] = depId;
+        }
+      }
+    }
+
+    if (remote.users) {
+      this.db.users = { ...remote.users, ...this.db.users };
+    }
+    if (remote.organizations) {
+      this.db.organizations = { ...remote.organizations, ...this.db.organizations };
+    }
+    if (remote.memberships) {
+      this.db.memberships = { ...remote.memberships, ...this.db.memberships };
+    }
+    if (remote.projects) {
+      this.db.projects = { ...remote.projects, ...this.db.projects };
+    }
+    if (remote.encryptedSecrets) {
+      this.db.encryptedSecrets = { ...remote.encryptedSecrets, ...this.db.encryptedSecrets };
+    }
+    if (remote.githubInstallations) {
+      this.db.githubInstallations = { ...remote.githubInstallations, ...this.db.githubInstallations };
+    }
+    if (remote.prPreviewComments) {
+      this.db.prPreviewComments = { ...remote.prPreviewComments, ...this.db.prPreviewComments };
+    }
+    if (remote.processedWebhookDeliveries) {
+      this.db.processedWebhookDeliveries = { ...remote.processedWebhookDeliveries, ...this.db.processedWebhookDeliveries };
+    }
+  }
+
   /**
    * DM-902: Cloud-native shared state synchronization via private S3 state bucket.
    * Ensures multi-container Lambda instances and cold-starts stay synchronized with zero data loss.
@@ -159,46 +268,60 @@ export class DeploymentStore implements IDeploymentRepository {
       if (res.Body) {
         const raw = await res.Body.transformToString();
         const parsed = JSON.parse(raw) as Partial<PersistedDatabase>;
-        if (parsed.deployments && Object.keys(parsed.deployments).length > 0) {
-          this.db = {
-            deployments: { ...parsed.deployments, ...this.db.deployments },
-            reservedHostnames: { ...parsed.reservedHostnames, ...this.db.reservedHostnames },
-            users: { ...parsed.users, ...this.db.users },
-            organizations: { ...parsed.organizations, ...this.db.organizations },
-            memberships: { ...parsed.memberships, ...this.db.memberships },
-            projects: { ...parsed.projects, ...this.db.projects },
-            encryptedSecrets: { ...parsed.encryptedSecrets, ...this.db.encryptedSecrets },
-            githubInstallations: { ...parsed.githubInstallations, ...this.db.githubInstallations },
-            prPreviewComments: { ...parsed.prPreviewComments, ...this.db.prPreviewComments },
-            processedWebhookDeliveries: { ...parsed.processedWebhookDeliveries, ...this.db.processedWebhookDeliveries },
-          };
-          this.saveToDisk(false);
-        }
+        this.mergeRemoteDatabase(parsed);
+        this.saveToDisk(false);
       }
     } catch {
       // Fallback silently if S3 state file is not yet created
     }
   }
 
-  private s3SyncChain: Promise<void> = Promise.resolve();
+  public async syncToS3(): Promise<void> {
+    if (!this.s3Client || !this.s3StateBucket) return;
 
-  public syncToS3(): Promise<void> {
-    if (!this.s3Client || !this.s3StateBucket) return Promise.resolve();
-    this.s3SyncChain = this.s3SyncChain.then(async () => {
+    if (this.s3SyncPromise) {
+      this.s3SyncNeeded = true;
+      return this.s3SyncPromise;
+    }
+
+    this.s3SyncPromise = (async () => {
       try {
-        await this.s3Client!.send(
-          new PutObjectCommand({
-            Bucket: this.s3StateBucket!,
-            Key: this.s3StateKey,
-            Body: JSON.stringify(this.db, null, 2),
-            ContentType: 'application/json',
-          })
-        );
+        do {
+          this.s3SyncNeeded = false;
+          // Hydrate remote S3 state and merge before writing so we never overwrite remote records
+          try {
+            const res = await this.s3Client!.send(
+              new GetObjectCommand({
+                Bucket: this.s3StateBucket!,
+                Key: this.s3StateKey,
+              })
+            );
+            if (res.Body) {
+              const raw = await res.Body.transformToString();
+              const remoteDb = JSON.parse(raw) as Partial<PersistedDatabase>;
+              this.mergeRemoteDatabase(remoteDb);
+            }
+          } catch {
+            // S3 state file not created yet or first run
+          }
+
+          await this.s3Client!.send(
+            new PutObjectCommand({
+              Bucket: this.s3StateBucket!,
+              Key: this.s3StateKey,
+              Body: JSON.stringify(this.db, null, 2),
+              ContentType: 'application/json',
+            })
+          );
+        } while (this.s3SyncNeeded);
       } catch (err: unknown) {
         console.error('Failed to sync state to S3:', err);
+      } finally {
+        this.s3SyncPromise = null;
       }
-    });
-    return this.s3SyncChain;
+    })();
+
+    return this.s3SyncPromise;
   }
 
   /**
@@ -646,13 +769,18 @@ export class DeploymentStore implements IDeploymentRepository {
   }
 
   public listOrganizationsForUser(
-    userId: string
+    userId: string,
+    email?: string
   ): Array<{ organization: OrganizationRecord; role: OrgRole }> {
+    const normEmail = email?.trim().toLowerCase();
     const userMemberships = Object.values(this.db.memberships).filter(
-      (m) => m.userId === userId
+      (m) => m.userId === userId || (normEmail && m.userEmail?.toLowerCase() === normEmail)
     );
+    const seenOrgIds = new Set<string>();
     const results: Array<{ organization: OrganizationRecord; role: OrgRole }> = [];
     for (const m of userMemberships) {
+      if (seenOrgIds.has(m.orgId)) continue;
+      seenOrgIds.add(m.orgId);
       const org = this.db.organizations[m.orgId];
       if (org) {
         results.push({ organization: org, role: m.role });

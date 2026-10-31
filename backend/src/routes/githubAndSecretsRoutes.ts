@@ -188,7 +188,8 @@ export function createGitHubAndSecretsRouter(
   router.post(
     '/projects/:projectId/rollback/:deploymentId',
     requireAuth,
-    (req: Request, res: Response) => {
+    async (req: Request, res: Response) => {
+      await store.loadFromS3();
       const auth = req.auth!;
       const { projectId, deploymentId } = req.params;
 
@@ -219,6 +220,8 @@ export function createGitHubAndSecretsRouter(
       if (!rollback.ok) {
         return res.status(rollback.statusCode).json({ error: rollback.error });
       }
+
+      await store.syncToS3();
 
       return res.status(200).json({
         ok: true,

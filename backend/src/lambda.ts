@@ -5,8 +5,17 @@ import { deploymentStore } from './store/deploymentStore';
 import { resolveServerControlledDomain } from './utils/validation';
 
 const httpHandler = serverless(app);
+let isHydrated = false;
 
 export const handler = async (event: any, context: any) => {
+  if (!isHydrated) {
+    try {
+      await deploymentStore.loadFromS3();
+      isHydrated = true;
+    } catch {
+      // non-fatal fallback
+    }
+  }
   // If invoked directly by async self-invocation for background deployment
   if (event && event.action === 'PROCESS_DEPLOYMENT') {
     const payload = event.payload || event;

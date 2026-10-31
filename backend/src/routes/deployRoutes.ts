@@ -223,6 +223,7 @@ export function createDeployRouter(
    * Phases 1–9 API Contract: Multi-Cloud, Multi-Tenant, RBAC-Protected, Queue-Backed Deployments.
    */
   router.post('/deploy', async (req: Request, res: Response) => {
+    await store.loadFromS3();
     const rateCheck = securityGuardrails.checkRateLimit(req.ip || 'deploy-client');
     if (!rateCheck.allowed) {
       return res.status(429).json({ error: rateCheck.error });
@@ -357,16 +358,22 @@ export function createDeployRouter(
           code: 'FORBIDDEN_RBAC',
         });
       }
-      const orgDeployments = store.listByOrg(req.auth.activeOrgId);
-      const legacyDeployments = store.listAll().filter((d) => !d.orgId);
-      const combined = [...orgDeployments];
-      for (const leg of legacyDeployments) {
-        if (!combined.some((d) => d.deploymentId === leg.deploymentId)) {
-          combined.push(leg);
-        }
+      const userOrgs = store.listOrganizationsForUser(
+        req.auth.user.userId,
+        req.auth.user.email
+      );
+      const allowedOrgIds = new Set<string>(userOrgs.map((o) => o.organization.orgId));
+      if (req.auth.activeOrgId) {
+        allowedOrgIds.add(req.auth.activeOrgId);
       }
+
+      const allDeps = store.listAll();
+      const visible = allDeps.filter(
+        (d) => !d.orgId || allowedOrgIds.has(d.orgId)
+      );
+
       return res.json({
-        deployments: combined.sort(
+        deployments: visible.sort(
           (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
         ),
       });
@@ -382,6 +389,7 @@ export function createDeployRouter(
    * Enforces cross-tenant IDOR protection (404) before RBAC environment checks (403).
    */
   router.delete('/deploy/:id', async (req: Request, res: Response) => {
+    await store.loadFromS3();
     if (req.auth) {
       if (!req.auth.activeOrgId || !req.auth.activeRole) {
         return res.status(404).json({
@@ -431,6 +439,7 @@ export function createDeployRouter(
    * Phase 8 & 9: 1-Click Self-Healing Retry with tenant isolation and RBAC verification.
    */
   router.post('/deploy/:id/retry', async (req: Request, res: Response) => {
+    await store.loadFromS3();
     if (req.auth) {
       if (!req.auth.activeOrgId || !req.auth.activeRole) {
         return res.status(404).json({

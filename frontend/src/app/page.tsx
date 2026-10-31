@@ -312,10 +312,50 @@ export default function Phase3DeployPage() {
       if (sec) setSecurityStatus(sec);
       if (obs) setMetrics(obs);
       if (qSnap) setQueueSnapshot(qSnap);
+
+      setDeployment((prev) => {
+        if (prev) {
+          const fresh = res.deployments.find((d) => d.deploymentId === prev.deploymentId);
+          return fresh || prev;
+        }
+        // Auto-restore active deployment if page refreshed or during in-flight build
+        const inFlight = res.deployments.find((d) =>
+          ['QUEUED', 'ANALYZING', 'BUILDING', 'DEPLOYING', 'CONFIGURING_DOMAIN', 'VERIFYING'].includes(d.status)
+        );
+        if (inFlight) {
+          setIsDeploying(true);
+          return inFlight;
+        }
+        if (typeof window !== 'undefined') {
+          const storedId = window.sessionStorage.getItem('dm_active_deployment_id');
+          if (storedId) {
+            const stored = res.deployments.find((d) => d.deploymentId === storedId);
+            if (stored) {
+              if (['QUEUED', 'ANALYZING', 'BUILDING', 'DEPLOYING', 'CONFIGURING_DOMAIN', 'VERIFYING'].includes(stored.status)) {
+                setIsDeploying(true);
+              }
+              return stored;
+            }
+          }
+        }
+        return null;
+      });
     } catch {
       // Ignore if backend is restarting
     }
   }, []);
+
+  useEffect(() => {
+    if (deployment) {
+      try {
+        if (deployment.status === 'DELETED') {
+          sessionStorage.removeItem('dm_active_deployment_id');
+        } else {
+          sessionStorage.setItem('dm_active_deployment_id', deployment.deploymentId);
+        }
+      } catch {}
+    }
+  }, [deployment]);
 
   const syncSessionFromBackend = useCallback(async () => {
     try {
