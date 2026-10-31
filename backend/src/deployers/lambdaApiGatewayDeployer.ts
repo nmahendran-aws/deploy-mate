@@ -401,7 +401,11 @@ export class LambdaApiGatewayDeployer implements IDeployer {
           await new Promise((r) => setTimeout(r, 4000));
           continue;
         }
-        if (lastError.message.includes('ResourceConflictException')) {
+        if (
+          lastError.message.includes('ResourceConflictException') ||
+          lastError.message.includes('Function already exist') ||
+          lastError.message.includes('failed (409)')
+        ) {
           params.onLog(
             `Phase 5 Task 3: AWS Lambda Function "${params.functionName}" already exists. Updating code...`
           );
