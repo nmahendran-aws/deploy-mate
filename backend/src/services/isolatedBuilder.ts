@@ -518,13 +518,22 @@ def handler(event, context):
       fs.writeFileSync(fullHandlerPath, generatedHandler, 'utf-8');
     }
 
-    // Collect top-level source files (excluding node_modules/.git and files >2MB) for the Lambda ZIP
+    // Collect top-level source files (excluding node_modules/.git and files >15MB) for the Lambda ZIP
     const entries: Array<{ name: string; data: Buffer }> = [];
+    const relHandler = path.relative(params.repoDir, fullHandlerPath).split(path.sep).join('/');
+    if (fs.existsSync(fullHandlerPath)) {
+      entries.push({
+        name: relHandler,
+        data: fs.readFileSync(fullHandlerPath),
+      });
+    }
+
     const relFiles = this.listFilesRecursively(params.repoDir, params.repoDir).filter(
       (f) => !f.startsWith('node_modules/') && !f.startsWith('.git/') && !f.endsWith('.tar.gz')
     );
 
     for (const rel of relFiles.slice(0, 100)) {
+      if (rel === relHandler) continue;
       const abs = path.join(params.repoDir, rel);
       const stat = fs.statSync(abs);
       if (stat.isFile() && stat.size <= 15 * 1024 * 1024) {

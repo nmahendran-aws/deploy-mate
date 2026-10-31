@@ -437,10 +437,69 @@ export class EcsFargateDeployer implements IDeployer {
       }
     }
 
+    // 3. Scale down and delete ECS Fargate service
     if (ecsServiceName && ecsClusterName) {
-      onLog(
-        `Cleaned up ECS Fargate service "${ecsServiceName}" on cluster "${ecsClusterName}".`
-      );
+      try {
+        await this.signedAwsJsonRequest({
+          service: 'ecs',
+          region,
+          host: `ecs.${region}.amazonaws.com`,
+          amzTarget: 'AmazonEC2ContainerServiceV20141113.UpdateService',
+          body: {
+            cluster: ecsClusterName,
+            service: ecsServiceName,
+            desiredCount: 0,
+          },
+        });
+        onLog(`Scaled down ECS Fargate service "${ecsServiceName}" to 0 desired tasks.`);
+      } catch {
+        // Ignore if service not found
+      }
+
+      try {
+        await this.signedAwsJsonRequest({
+          service: 'ecs',
+          region,
+          host: `ecs.${region}.amazonaws.com`,
+          amzTarget: 'AmazonEC2ContainerServiceV20141113.DeleteService',
+          body: {
+            cluster: ecsClusterName,
+            service: ecsServiceName,
+            force: true,
+          },
+        });
+        onLog(`Deleted ECS Fargate service "${ecsServiceName}" on cluster "${ecsClusterName}".`);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        onLog(`Notice deleting ECS service "${ecsServiceName}": ${msg}`);
+      }
+    }
+
+    // 4. Deprovision Application Load Balancer (ALB) & Target Group if configured
+    const albArn = process.env.ECS_ALB_ARN;
+    if (albArn) {
+      try {
+        execSync(`aws elbv2 delete-load-balancer --load-balancer-arn "${albArn}" --region ${region}`, {
+          stdio: 'pipe',
+          timeout: 30000,
+        });
+        onLog(`Deprovisioned Application Load Balancer (${albArn}).`);
+      } catch (err: unknown) {
+        // Ignore if already deleted
+      }
+    }
+
+    const tgArn = process.env.ECS_TARGET_GROUP_ARN || albTargetGroupArn;
+    if (tgArn && !tgArn.includes('123456789012')) {
+      try {
+        execSync(`aws elbv2 delete-target-group --target-group-arn "${tgArn}" --region ${region}`, {
+          stdio: 'pipe',
+          timeout: 30000,
+        });
+        onLog(`Deprovisioned ALB Target Group (${tgArn}).`);
+      } catch (err: unknown) {
+        // May take a few seconds after ALB deletion
+      }
     }
   }
 

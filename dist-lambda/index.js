@@ -1277,7 +1277,7 @@ var require_main = __commonJS({
   "node_modules/dotenv/lib/main.js"(exports2, module2) {
     var fs9 = require("fs");
     var path11 = require("path");
-    var os3 = require("os");
+    var os4 = require("os");
     var crypto11 = require("crypto");
     var packageJson = require_package();
     var version = packageJson.version;
@@ -1400,7 +1400,7 @@ var require_main = __commonJS({
       return null;
     }
     function _resolveHome(envPath) {
-      return envPath[0] === "~" ? path11.join(os3.homedir(), envPath.slice(1)) : envPath;
+      return envPath[0] === "~" ? path11.join(os4.homedir(), envPath.slice(1)) : envPath;
     }
     function _configVault(options) {
       const debug = Boolean(options && options.debug);
@@ -24349,6 +24349,7 @@ var import_crypto = __toESM(require("crypto"));
 // backend/src/store/deploymentStore.ts
 var import_events = require("events");
 var import_fs = __toESM(require("fs"));
+var import_os = __toESM(require("os"));
 var import_path = __toESM(require("path"));
 var import_client_dynamodb = require("@aws-sdk/client-dynamodb");
 var DeploymentStore = class {
@@ -24363,9 +24364,12 @@ var DeploymentStore = class {
   isDefaultStore;
   constructor(customFilePath) {
     this.events.setMaxListeners(100);
-    const dataDir = import_path.default.resolve(__dirname, "../../data");
-    if (!import_fs.default.existsSync(dataDir)) {
-      import_fs.default.mkdirSync(dataDir, { recursive: true });
+    const dataDir = process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT ? import_path.default.join(import_os.default.tmpdir(), "deploymate-data") : import_path.default.resolve(__dirname, "../../data");
+    try {
+      if (!import_fs.default.existsSync(dataDir)) {
+        import_fs.default.mkdirSync(dataDir, { recursive: true });
+      }
+    } catch {
     }
     this.filePath = customFilePath || import_path.default.join(dataDir, "deployments.json");
     this.isDefaultStore = !customFilePath;
@@ -26243,7 +26247,7 @@ ${aaaaChangeXml}
     }
     const urlToVerify = isPlaceholderZone ? fallbackCloudFrontUrl : url;
     onLog?.(`Task 8: Verifying live HTTPS reachability at ${urlToVerify}...`);
-    for (let attempt = 1; attempt <= 12; attempt++) {
+    for (let attempt = 1; attempt <= 30; attempt++) {
       if (urlToVerify !== fallbackCloudFrontUrl && fallbackCloudFrontUrl) {
         const sniStatus = await this.verifyCustomDomainViaCloudFrontSni(
           urlToVerify,
@@ -26439,7 +26443,7 @@ var sharedDomainManager = new SharedDomainManager();
 // backend/src/services/isolatedBuilder.ts
 var import_child_process = require("child_process");
 var import_fs3 = __toESM(require("fs"));
-var import_os = __toESM(require("os"));
+var import_os2 = __toESM(require("os"));
 var import_path4 = __toESM(require("path"));
 
 // backend/src/services/githubAppService.ts
@@ -27048,7 +27052,7 @@ var IsolatedBuildRunner = class {
   maxBuildDurationMs;
   useDockerIsolation;
   constructor() {
-    this.buildRoot = process.env.ISOLATED_BUILD_ROOT || import_path4.default.join(import_os.default.tmpdir(), "repo2cloud-isolated-builds");
+    this.buildRoot = process.env.ISOLATED_BUILD_ROOT || import_path4.default.join(import_os2.default.tmpdir(), "repo2cloud-isolated-builds");
     this.maxBuildDurationMs = Number(process.env.MAX_BUILD_DURATION_MS || 18e4);
     this.useDockerIsolation = process.env.USE_DOCKER_ISOLATION === "true";
     if (!import_fs3.default.existsSync(this.buildRoot)) {
@@ -27232,7 +27236,10 @@ var IsolatedBuildRunner = class {
           try {
             const parsedPkg = JSON.parse(import_fs3.default.readFileSync(pkgPath, "utf8"));
             const depCount = Object.keys(parsedPkg.dependencies || {}).length + Object.keys(parsedPkg.devDependencies || {}).length;
-            if (depCount === 0 || import_fs3.default.existsSync(import_path4.default.join(params.repoDir, "node_modules"))) {
+            const hasWorkspaces = Boolean(
+              parsedPkg?.workspaces
+            );
+            if (depCount === 0 && !hasWorkspaces || import_fs3.default.existsSync(import_path4.default.join(params.repoDir, "node_modules"))) {
               needsNpmInstall = false;
             }
           } catch {
@@ -27412,10 +27419,18 @@ def handler(event, context):
       import_fs3.default.writeFileSync(fullHandlerPath, generatedHandler, "utf-8");
     }
     const entries = [];
+    const relHandler = import_path4.default.relative(params.repoDir, fullHandlerPath).split(import_path4.default.sep).join("/");
+    if (import_fs3.default.existsSync(fullHandlerPath)) {
+      entries.push({
+        name: relHandler,
+        data: import_fs3.default.readFileSync(fullHandlerPath)
+      });
+    }
     const relFiles = this.listFilesRecursively(params.repoDir, params.repoDir).filter(
       (f) => !f.startsWith("node_modules/") && !f.startsWith(".git/") && !f.endsWith(".tar.gz")
     );
     for (const rel of relFiles.slice(0, 100)) {
+      if (rel === relHandler) continue;
       const abs = import_path4.default.join(params.repoDir, rel);
       const stat = import_fs3.default.statSync(abs);
       if (stat.isFile() && stat.size <= 15 * 1024 * 1024) {
@@ -27911,7 +27926,7 @@ var CloudProviderNotAvailableError = class extends Error {
 var import_child_process2 = require("child_process");
 var import_crypto7 = __toESM(require("crypto"));
 var import_fs4 = __toESM(require("fs"));
-var import_os2 = __toESM(require("os"));
+var import_os3 = __toESM(require("os"));
 var import_path5 = __toESM(require("path"));
 var ALB_HOSTED_ZONE_BY_REGION = {
   "us-east-1": "Z35SXDOTRQ7X7K",
@@ -28331,7 +28346,7 @@ var EcsFargateDeployer = class {
         throw new Error("Could not retrieve ECR authorization token for Docker push.");
       }
       const registryHost = proxyEndpoint.replace(/^https?:\/\//, "");
-      tmpDockerDir = import_fs4.default.mkdtempSync(import_path5.default.join(import_os2.default.tmpdir(), "ecr-docker-"));
+      tmpDockerDir = import_fs4.default.mkdtempSync(import_path5.default.join(import_os3.default.tmpdir(), "ecr-docker-"));
       const configJson = {
         auths: {
           [registryHost]: {
@@ -29004,9 +29019,11 @@ var FullstackServerlessDeployer = class {
     ctx.onResourceCreated({ s3BucketName: bucketName, s3KeyPrefix: "" });
     let staticDir = ctx.buildResult.artifactDir;
     const candidates = [
+      import_path6.default.join(ctx.buildResult.repoDir, "dist"),
       import_path6.default.join(ctx.buildResult.repoDir, "frontend", "out"),
       import_path6.default.join(ctx.buildResult.repoDir, "out"),
-      import_path6.default.join(ctx.buildResult.repoDir, "dist"),
+      import_path6.default.join(process.cwd(), "dist"),
+      import_path6.default.join(process.cwd(), "frontend", "out"),
       ctx.buildResult.artifactDir
     ];
     for (const c of candidates) {
@@ -29048,12 +29065,25 @@ var FullstackServerlessDeployer = class {
     );
     const lambdaEntry = import_path6.default.join(ctx.buildResult.repoDir, "backend", "src", "lambda.ts");
     const bundledOut = import_path6.default.join(ctx.buildResult.repoDir, "index.js");
-    if (import_fs5.default.existsSync(lambdaEntry)) {
+    const prebuiltLambda = import_path6.default.join(process.cwd(), "dist-lambda", "index.js");
+    if (import_fs5.default.existsSync(prebuiltLambda)) {
+      import_fs5.default.copyFileSync(prebuiltLambda, bundledOut);
+      ctx.onLog(
+        `Phase 10: Deployed pre-bundled standalone serverless Express API (${(import_fs5.default.statSync(bundledOut).size / 1024).toFixed(1)} KB).`
+      );
+    } else if (import_fs5.default.existsSync(lambdaEntry)) {
       try {
+        const rootNodeModules = import_path6.default.join(process.cwd(), "node_modules");
         const { execSync: execSync2 } = require("child_process");
         execSync2(
           `npx esbuild "${lambdaEntry}" --bundle --platform=node --target=node20 --outfile="${bundledOut}" --external:@aws-sdk`,
-          { stdio: "pipe" }
+          {
+            stdio: "pipe",
+            env: {
+              ...process.env,
+              NODE_PATH: `${rootNodeModules}:${import_path6.default.join(ctx.buildResult.repoDir, "node_modules")}`
+            }
+          }
         );
         ctx.onLog(
           `Phase 10: Bundled backend API into standalone index.js (${(import_fs5.default.statSync(bundledOut).size / 1024).toFixed(1)} KB).`
@@ -29254,6 +29284,24 @@ var FullstackServerlessDeployer = class {
       ctx.onLog(`S3 bucket policy note: ${err instanceof Error ? err.message : String(err)}`);
     }
     ctx.onLog(
+      `Waiting for CloudFront distribution ${distributionId} to propagate to edge locations...`
+    );
+    for (let poll = 0; poll < 45; poll++) {
+      try {
+        const getRes = await cloudfront.send(
+          new import_client_cloudfront.GetDistributionCommand({ Id: distributionId })
+        );
+        if (getRes.Distribution?.Status === "Deployed") {
+          ctx.onLog(
+            `CloudFront distribution ${distributionId} reached "Deployed" status.`
+          );
+          break;
+        }
+      } catch {
+      }
+      await new Promise((r) => setTimeout(r, 4e3));
+    }
+    ctx.onLog(
       `Successfully provisioned Zero-Cost Full-Stack Serverless distribution (${distributionId}) at https://${cloudFrontDomainName}.`
     );
     return {
@@ -29296,7 +29344,8 @@ var FullstackServerlessDeployer = class {
         if (getRes.Distribution?.DistributionConfig?.Enabled) {
           const disabledConfig = {
             ...getRes.Distribution.DistributionConfig,
-            Enabled: false
+            Enabled: false,
+            Aliases: { Quantity: 0 }
           };
           const updateRes = await cloudfront.send(
             new import_client_cloudfront.UpdateDistributionCommand({

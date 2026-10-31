@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
 import {
@@ -98,9 +99,16 @@ export class DeploymentStore implements IDeploymentRepository {
 
   constructor(customFilePath?: string) {
     this.events.setMaxListeners(100);
-    const dataDir = path.resolve(__dirname, '../../data');
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
+    const dataDir =
+      process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT
+        ? path.join(os.tmpdir(), 'deploymate-data')
+        : path.resolve(__dirname, '../../data');
+    try {
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+      }
+    } catch {
+      // Ignore if filesystem is read-only
     }
     this.filePath = customFilePath || path.join(dataDir, 'deployments.json');
     this.isDefaultStore = !customFilePath;
