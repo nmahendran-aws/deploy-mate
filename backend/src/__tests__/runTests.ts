@@ -19,6 +19,7 @@ import { DeploymentManager } from '../services/deploymentManager';
 import { githubAppService } from '../services/githubAppService';
 import { computeGitHubWebhookSignature } from '../services/githubWebhookService';
 import { isolatedBuildRunner } from '../services/isolatedBuilder';
+import { codeBuildService } from '../services/codeBuildService';
 import { RepositoryAnalyzer } from '../services/repositoryAnalyzer';
 import { secretsVault } from '../services/secretsVault';
 import { securityGuardrails } from '../services/securityGuardrails';
@@ -1752,13 +1753,95 @@ fs.writeFileSync(path.join(__dirname, 'dist/index.html'), '<h1>Built</h1>', 'utf
   }
 
   console.log('   ✓ DM-913 (TC-913-01 AES-256-GCM + Tamper Check, AC2 .env Parser & TC-913-02 [REDACTED] Log Scrubber) passed.\n');
-  console.log('ALL PHASE 9 · SPRINT 2 TESTS (DM-906, DM-907, DM-908, DM-913) PASSED!');
+  console.log('ALL PHASE 9 · SPRINT 2 TESTS (DM-906, DM-907, DM-908, DM-913) PASSED!\n');
+}
+
+async function runCodeBuildTests(): Promise<void> {
+  console.log('=== Ephemeral AWS CodeBuild Serverless Build Worker Test Suite ===\n');
+
+  console.log('19. Testing CodeBuild Buildspec Generation & Artifact S3 Sync...');
+  const mockAnalysis = {
+    framework: 'Next.js',
+    applicationType: 'ssr-frontend' as const,
+    buildCommand: 'npm run build',
+    outputDirectory: 'dist',
+    recommendedTarget: 'S3_CLOUDFRONT' as const,
+    confidence: 0.95,
+    warnings: [],
+    reasons: ['Static export ready'],
+    signalsDetected: [{ signal: 'package.json', description: 'Next.js' }],
+  };
+
+  const s3Spec = codeBuildService.generateBuildspec({
+    target: 'S3_CLOUDFRONT',
+    analysis: mockAnalysis,
+    repoUrl: 'https://github.com/example/repo',
+    branch: 'main',
+    targetS3Bucket: 'test-bucket',
+    targetS3Prefix: 'my-app',
+  });
+  assert.ok(s3Spec.includes('version: 0.2'), 'Expected CodeBuild version 0.2');
+  assert.ok(s3Spec.includes('npm run build'), 'Expected build command in buildspec');
+  assert.ok(s3Spec.includes('aws s3 sync dist/ s3://test-bucket/my-app/ --delete'), 'Expected S3 sync command');
+
+  const ecsSpec = codeBuildService.generateBuildspec({
+    target: 'ECS_FARGATE',
+    analysis: mockAnalysis,
+    repoUrl: 'https://github.com/example/repo',
+    branch: 'production',
+    ecrRepositoryUri: '123456789012.dkr.ecr.us-east-1.amazonaws.com/my-app:latest',
+  });
+  assert.ok(ecsSpec.includes('docker build --platform=linux/amd64'), 'Expected Docker build command');
+  assert.ok(ecsSpec.includes('docker push 123456789012.dkr.ecr.us-east-1.amazonaws.com/my-app:latest'), 'Expected Docker push');
+  console.log('   ✓ CodeBuild buildspecs for S3_CLOUDFRONT and ECS_FARGATE verified.');
+
+  console.log('20. Testing CodeBuild Environment Variable Sanitization...');
+  const sanitized = codeBuildService.sanitizeEnvironmentVariables({
+    API_URL: 'https://api.example.com',
+    AWS_SECRET_ACCESS_KEY: 'secret-val',
+    GITHUB_TOKEN: 'gh_secret',
+    PATH: '/bin',
+  });
+  const names = sanitized.map((v) => v.name);
+  assert.ok(names.includes('API_URL'), 'Expected user env var preserved');
+  assert.ok(!names.includes('AWS_SECRET_ACCESS_KEY'), 'Expected AWS credentials stripped');
+  assert.ok(!names.includes('GITHUB_TOKEN'), 'Expected GitHub tokens stripped');
+  assert.ok(!names.includes('PATH'), 'Expected PATH override stripped');
+  console.log('   ✓ CodeBuild environment variable sanitization verified.');
+
+  console.log('21. Testing CodeBuild DryRun Execution & Build Engine Detection...');
+  const logs: string[] = [];
+  const buildResult = await codeBuildService.executeBuild({
+    deploymentId: 'dep_codebuild_test_1',
+    repoUrl: 'https://github.com/example/repo',
+    target: 'S3_CLOUDFRONT',
+    analysis: mockAnalysis,
+    dryRun: true,
+    onLog: (m) => logs.push(m),
+  });
+  assert.strictEqual(buildResult.buildStatus, 'SUCCEEDED', 'Expected SUCCEEDED status in dryRun');
+  assert.ok(logs.some((l) => l.includes('BUILD_GENERAL1_SMALL')), 'Expected BUILD_GENERAL1_SMALL logged');
+
+  const prevEngine = process.env.BUILD_ENGINE;
+  delete process.env.BUILD_ENGINE;
+  delete process.env.AWS_LAMBDA_FUNCTION_NAME;
+  assert.strictEqual(isolatedBuildRunner.getBuildEngine(), 'local', 'Expected local engine by default');
+
+  process.env.BUILD_ENGINE = 'codebuild';
+  assert.strictEqual(isolatedBuildRunner.getBuildEngine(), 'codebuild', 'Expected codebuild engine when configured');
+
+  if (prevEngine) process.env.BUILD_ENGINE = prevEngine;
+  else delete process.env.BUILD_ENGINE;
+
+  console.log('   ✓ CodeBuild dryRun execution and engine switching verified.\n');
+  console.log('ALL CODEBUILD SERVERLESS BUILD WORKER TESTS PASSED!\n');
 }
 
 async function runAllTests(): Promise<void> {
   await runPhase1To3Tests();
   await runPhase9Sprint1Tests();
   await runPhase9Sprint2Tests();
+  await runCodeBuildTests();
 }
 
 runAllTests().catch((err) => {

@@ -4,6 +4,7 @@ import os from 'os';
 import path from 'path';
 import { AnalysisResult } from '../types/deployment';
 import { githubAppService } from './githubAppService';
+import { codeBuildService } from './codeBuildService';
 
 export interface IsolatedBuildResult {
   workspaceDir: string;
@@ -29,6 +30,13 @@ export class IsolatedBuildRunner {
     if (!fs.existsSync(this.buildRoot)) {
       fs.mkdirSync(this.buildRoot, { recursive: true });
     }
+  }
+
+  public getBuildEngine(): 'local' | 'codebuild' {
+    if (process.env.BUILD_ENGINE === 'codebuild' || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+      return 'codebuild';
+    }
+    return 'local';
   }
 
   /**
@@ -231,8 +239,9 @@ export class IsolatedBuildRunner {
     const nodeExec = process.execPath;
     const npmCli = path.join(path.dirname(nodeExec), 'npm');
 
+    const buildEngine = this.getBuildEngine();
     log(
-      `Isolated build worker initialized (timeout=${Math.round(
+      `Isolated build worker initialized (engine=${buildEngine}, timeout=${Math.round(
         this.maxBuildDurationMs / 1000
       )}s, awsCredentialsExposed=false, dockerIsolation=${this.useDockerIsolation}).`
     );
@@ -241,7 +250,18 @@ export class IsolatedBuildRunner {
     const artifactDir =
       outSubdir === '.' ? params.repoDir : path.join(params.repoDir, outSubdir);
 
-    if (params.clonedFromRemote && !params.dryRun) {
+    if (buildEngine === 'codebuild' && params.clonedFromRemote && !params.dryRun) {
+      log('Offloading build execution to ephemeral AWS CodeBuild worker (Project: deploymate-build-worker, Zero-Idle-Cost)...');
+      await codeBuildService.executeBuild({
+        deploymentId: params.deploymentId,
+        repoUrl: params.repoUrl,
+        target: params.analysis.recommendedTarget || 'S3_CLOUDFRONT',
+        analysis: params.analysis,
+        userEnvVars: params.userEnvVars,
+        dryRun: false,
+        onLog: log,
+      });
+    } else if (params.clonedFromRemote && !params.dryRun) {
       if (this.useDockerIsolation) {
         log('Running build inside ephemeral Docker container (--cap-drop=ALL --security-opt=no-new-privileges)...');
         const buildCmd = params.analysis.buildCommand || 'npm run build';

@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-cloudfront": "^3.650.0",
+    "@aws-sdk/client-codebuild": "^3.1161.0",
     "@aws-sdk/client-dynamodb": "^3.650.0",
     "@aws-sdk/client-s3": "^3.650.0",
     "cors": "^2.8.5",
