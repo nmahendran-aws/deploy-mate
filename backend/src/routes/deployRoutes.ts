@@ -345,8 +345,18 @@ export function createDeployRouter(
           code: 'FORBIDDEN_RBAC',
         });
       }
+      const orgDeployments = store.listByOrg(req.auth.activeOrgId);
+      const legacyDeployments = store.listAll().filter((d) => !d.orgId);
+      const combined = [...orgDeployments];
+      for (const leg of legacyDeployments) {
+        if (!combined.some((d) => d.deploymentId === leg.deploymentId)) {
+          combined.push(leg);
+        }
+      }
       return res.json({
-        deployments: store.listByOrg(req.auth.activeOrgId),
+        deployments: combined.sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        ),
       });
     }
 
@@ -367,7 +377,13 @@ export function createDeployRouter(
         });
       }
 
-      const existing = store.getForOrg(req.params.id, req.auth.activeOrgId);
+      let existing = store.getForOrg(req.params.id, req.auth.activeOrgId);
+      if (!existing && req.auth.activeRole === 'OWNER') {
+        const legacy = store.get(req.params.id);
+        if (legacy && !legacy.orgId) {
+          existing = legacy;
+        }
+      }
       if (!existing) {
         return res.status(404).json({
           error: `Deployment "${req.params.id}" not found.`,
@@ -410,7 +426,13 @@ export function createDeployRouter(
         });
       }
 
-      const existing = store.getForOrg(req.params.id, req.auth.activeOrgId);
+      let existing = store.getForOrg(req.params.id, req.auth.activeOrgId);
+      if (!existing && req.auth.activeRole === 'OWNER') {
+        const legacy = store.get(req.params.id);
+        if (legacy && !legacy.orgId) {
+          existing = legacy;
+        }
+      }
       if (!existing) {
         return res.status(404).json({
           error: `Deployment "${req.params.id}" not found.`,

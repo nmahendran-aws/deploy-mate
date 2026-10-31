@@ -24352,11 +24352,15 @@ var import_fs = __toESM(require("fs"));
 var import_os = __toESM(require("os"));
 var import_path = __toESM(require("path"));
 var import_client_dynamodb = require("@aws-sdk/client-dynamodb");
+var import_client_s3 = require("@aws-sdk/client-s3");
 var DeploymentStore = class {
   filePath;
   db;
   dynamoClient;
   dynamoTableName;
+  s3Client;
+  s3StateBucket;
+  s3StateKey = "state/deployments.json";
   pgPool;
   /** In-memory secret values registered per deployment for automatic audit log scrubbing (DM-913) */
   secretRedactions = /* @__PURE__ */ new Map();
@@ -24386,6 +24390,62 @@ var DeploymentStore = class {
     if (process.env.DATABASE_URL && process.env.FORCE_DRY_RUN_TEST !== "true") {
       void this.initializePostgresPool(process.env.DATABASE_URL);
     }
+    if (this.isDefaultStore && process.env.DEPLOYMATE_STATE_BUCKET && process.env.FORCE_DRY_RUN_TEST !== "true") {
+      this.s3StateBucket = process.env.DEPLOYMATE_STATE_BUCKET;
+      this.s3Client = new import_client_s3.S3Client({
+        region: process.env.AWS_REGION || "us-east-1"
+      });
+      void this.loadFromS3();
+    }
+  }
+  /**
+   * DM-902: Cloud-native shared state synchronization via private S3 state bucket.
+   * Ensures multi-container Lambda instances and cold-starts stay synchronized with zero data loss.
+   */
+  async loadFromS3() {
+    if (!this.s3Client || !this.s3StateBucket) return;
+    try {
+      const res = await this.s3Client.send(
+        new import_client_s3.GetObjectCommand({
+          Bucket: this.s3StateBucket,
+          Key: this.s3StateKey
+        })
+      );
+      if (res.Body) {
+        const raw = await res.Body.transformToString();
+        const parsed = JSON.parse(raw);
+        if (parsed.deployments && Object.keys(parsed.deployments).length > 0) {
+          this.db = {
+            deployments: { ...parsed.deployments, ...this.db.deployments },
+            reservedHostnames: { ...parsed.reservedHostnames, ...this.db.reservedHostnames },
+            users: { ...parsed.users, ...this.db.users },
+            organizations: { ...parsed.organizations, ...this.db.organizations },
+            memberships: { ...parsed.memberships, ...this.db.memberships },
+            projects: { ...parsed.projects, ...this.db.projects },
+            encryptedSecrets: { ...parsed.encryptedSecrets, ...this.db.encryptedSecrets },
+            githubInstallations: { ...parsed.githubInstallations, ...this.db.githubInstallations },
+            prPreviewComments: { ...parsed.prPreviewComments, ...this.db.prPreviewComments },
+            processedWebhookDeliveries: { ...parsed.processedWebhookDeliveries, ...this.db.processedWebhookDeliveries }
+          };
+          this.saveToDisk(false);
+        }
+      }
+    } catch {
+    }
+  }
+  async syncToS3() {
+    if (!this.s3Client || !this.s3StateBucket) return;
+    try {
+      await this.s3Client.send(
+        new import_client_s3.PutObjectCommand({
+          Bucket: this.s3StateBucket,
+          Key: this.s3StateKey,
+          Body: JSON.stringify(this.db, null, 2),
+          ContentType: "application/json"
+        })
+      );
+    } catch {
+    }
   }
   /**
    * Optional PostgreSQL connection pool initialization when DATABASE_URL is configured (DM-902).
@@ -24410,8 +24470,11 @@ var DeploymentStore = class {
       if (!import_fs.default.existsSync(targetFile) && this.isDefaultStore) {
         const seedPath = import_path.default.resolve(__dirname, "seedDeployments.json");
         const altSeedPath = import_path.default.resolve(__dirname, "../../data/deployments.json");
+        const lambdaSeed = import_path.default.resolve("/var/task/seedDeployments.json");
         if (import_fs.default.existsSync(seedPath)) {
           targetFile = seedPath;
+        } else if (import_fs.default.existsSync(lambdaSeed)) {
+          targetFile = lambdaSeed;
         } else if (import_fs.default.existsSync(altSeedPath)) {
           targetFile = altSeedPath;
         }
@@ -24447,7 +24510,7 @@ var DeploymentStore = class {
       processedWebhookDeliveries: {}
     };
   }
-  saveToDisk() {
+  saveToDisk(syncS3 = true) {
     const dir = import_path.default.dirname(this.filePath);
     if (!import_fs.default.existsSync(dir)) {
       import_fs.default.mkdirSync(dir, { recursive: true });
@@ -24455,6 +24518,9 @@ var DeploymentStore = class {
     const tmpFile = `${this.filePath}.${process.pid}.${Date.now()}.tmp`;
     import_fs.default.writeFileSync(tmpFile, JSON.stringify(this.db, null, 2), "utf-8");
     import_fs.default.renameSync(tmpFile, this.filePath);
+    if (syncS3 && this.s3StateBucket) {
+      void this.syncToS3();
+    }
   }
   async syncToPostgres(record) {
     if (!this.pgPool) return;
@@ -26018,6 +26084,7 @@ var deploymentJobQueue = new DeploymentJobQueue();
 var import_crypto9 = __toESM(require("crypto"));
 var import_dotenv3 = __toESM(require_main());
 var import_path9 = __toESM(require("path"));
+var import_client_lambda = require("@aws-sdk/client-lambda");
 
 // backend/src/deployers/amplifyDeployer.ts
 var import_crypto6 = __toESM(require("crypto"));
@@ -28697,7 +28764,7 @@ var ecsFargateDeployer = new EcsFargateDeployer();
 
 // backend/src/deployers/fullstackServerlessDeployer.ts
 var import_client_cloudfront = require("@aws-sdk/client-cloudfront");
-var import_client_s3 = require("@aws-sdk/client-s3");
+var import_client_s32 = require("@aws-sdk/client-s3");
 var import_fs5 = __toESM(require("fs"));
 var import_path6 = __toESM(require("path"));
 
@@ -29304,12 +29371,12 @@ var FullstackServerlessDeployer = class {
         }
       };
     }
-    const s3 = new import_client_s3.S3Client({ region });
+    const s3 = new import_client_s32.S3Client({ region });
     const cloudfront = new import_client_cloudfront.CloudFrontClient({ region: "us-east-1" });
     ctx.onLog(`Creating private S3 bucket "${bucketName}" in ${region}...`);
     try {
       await s3.send(
-        new import_client_s3.CreateBucketCommand({
+        new import_client_s32.CreateBucketCommand({
           Bucket: bucketName,
           ...region !== "us-east-1" ? {
             CreateBucketConfiguration: {
@@ -29319,7 +29386,7 @@ var FullstackServerlessDeployer = class {
         })
       );
       await s3.send(
-        new import_client_s3.PutPublicAccessBlockCommand({
+        new import_client_s32.PutPublicAccessBlockCommand({
           Bucket: bucketName,
           PublicAccessBlockConfiguration: {
             BlockPublicAcls: true,
@@ -29364,7 +29431,7 @@ var FullstackServerlessDeployer = class {
           const cacheControl = ext === ".html" ? "public, max-age=0, must-revalidate" : "public, max-age=31536000, immutable";
           const body = import_fs5.default.readFileSync(fullPath);
           return s3.send(
-            new import_client_s3.PutObjectCommand({
+            new import_client_s32.PutObjectCommand({
               Bucket: bucketName,
               Key: s3Key,
               Body: body,
@@ -29577,7 +29644,7 @@ var FullstackServerlessDeployer = class {
     };
     try {
       await s3.send(
-        new import_client_s3.PutBucketPolicyCommand({
+        new import_client_s32.PutBucketPolicyCommand({
           Bucket: bucketName,
           Policy: JSON.stringify(bucketPolicy)
         })
@@ -29692,24 +29759,24 @@ var FullstackServerlessDeployer = class {
       }
     }
     if (s3BucketName) {
-      const s3 = new import_client_s3.S3Client({ region });
+      const s3 = new import_client_s32.S3Client({ region });
       try {
         let continuationToken;
         do {
           const listed = await s3.send(
-            new import_client_s3.ListObjectsV2Command({ Bucket: s3BucketName, ContinuationToken: continuationToken })
+            new import_client_s32.ListObjectsV2Command({ Bucket: s3BucketName, ContinuationToken: continuationToken })
           );
           const keys = (listed.Contents || []).filter((o) => Boolean(o.Key)).map((o) => ({ Key: o.Key }));
           if (keys.length > 0) {
-            await s3.send(new import_client_s3.DeleteObjectsCommand({ Bucket: s3BucketName, Delete: { Objects: keys, Quiet: true } }));
+            await s3.send(new import_client_s32.DeleteObjectsCommand({ Bucket: s3BucketName, Delete: { Objects: keys, Quiet: true } }));
           }
           continuationToken = listed.IsTruncated ? listed.NextContinuationToken : void 0;
         } while (continuationToken);
         try {
-          await s3.send(new import_client_s3.DeleteBucketPolicyCommand({ Bucket: s3BucketName }));
+          await s3.send(new import_client_s32.DeleteBucketPolicyCommand({ Bucket: s3BucketName }));
         } catch {
         }
-        await s3.send(new import_client_s3.DeleteBucketCommand({ Bucket: s3BucketName }));
+        await s3.send(new import_client_s32.DeleteBucketCommand({ Bucket: s3BucketName }));
         onLog(`Deleted private S3 bucket ${s3BucketName}.`);
       } catch (err) {
         onLog(`S3 cleanup note: ${err instanceof Error ? err.message : String(err)}`);
@@ -29739,7 +29806,7 @@ var fullstackServerlessDeployer = new FullstackServerlessDeployer();
 var import_fs6 = __toESM(require("fs"));
 var import_path7 = __toESM(require("path"));
 var import_client_cloudfront2 = require("@aws-sdk/client-cloudfront");
-var import_client_s32 = require("@aws-sdk/client-s3");
+var import_client_s33 = require("@aws-sdk/client-s3");
 var CLOUDFRONT_HOSTED_ZONE_ID3 = "Z2FDTNDATAQYW2";
 var MIME_TYPES2 = {
   ".html": "text/html; charset=utf-8",
@@ -29777,11 +29844,11 @@ var S3CloudFrontDeployer = class {
     if (ctx.dryRun) {
       return this.deployDryRun(ctx, bucketName, keyPrefix);
     }
-    const s3 = new import_client_s32.S3Client({ region });
+    const s3 = new import_client_s33.S3Client({ region });
     const cloudfront = new import_client_cloudfront2.CloudFrontClient({ region: "us-east-1" });
     ctx.onLog(`Creating private S3 bucket "${bucketName}" in ${region}...`);
     await s3.send(
-      new import_client_s32.CreateBucketCommand({
+      new import_client_s33.CreateBucketCommand({
         Bucket: bucketName,
         ...region !== "us-east-1" ? {
           CreateBucketConfiguration: {
@@ -29791,7 +29858,7 @@ var S3CloudFrontDeployer = class {
       })
     );
     await s3.send(
-      new import_client_s32.PutPublicAccessBlockCommand({
+      new import_client_s33.PutPublicAccessBlockCommand({
         Bucket: bucketName,
         PublicAccessBlockConfiguration: {
           BlockPublicAcls: true,
@@ -29817,7 +29884,7 @@ var S3CloudFrontDeployer = class {
           const cacheControl = ext === ".html" ? "public, max-age=0, must-revalidate" : "public, max-age=31536000, immutable";
           const body = import_fs6.default.readFileSync(fullPath);
           return s3.send(
-            new import_client_s32.PutObjectCommand({
+            new import_client_s33.PutObjectCommand({
               Bucket: bucketName,
               Key: s3Key,
               Body: body,
@@ -29956,7 +30023,7 @@ var S3CloudFrontDeployer = class {
       ]
     };
     await s3.send(
-      new import_client_s32.PutBucketPolicyCommand({
+      new import_client_s33.PutBucketPolicyCommand({
         Bucket: bucketName,
         Policy: JSON.stringify(bucketPolicy)
       })
@@ -30099,18 +30166,18 @@ var S3CloudFrontDeployer = class {
       }
     }
     if (s3BucketName) {
-      const s3 = new import_client_s32.S3Client({ region });
+      const s3 = new import_client_s33.S3Client({ region });
       try {
         let deletedCount = 0;
         let continuationToken;
         do {
           const listed = await s3.send(
-            new import_client_s32.ListObjectsV2Command({ Bucket: s3BucketName, ContinuationToken: continuationToken })
+            new import_client_s33.ListObjectsV2Command({ Bucket: s3BucketName, ContinuationToken: continuationToken })
           );
           const keys = (listed.Contents || []).filter((obj) => Boolean(obj.Key)).map((obj) => ({ Key: obj.Key }));
           if (keys.length > 0) {
             await s3.send(
-              new import_client_s32.DeleteObjectsCommand({
+              new import_client_s33.DeleteObjectsCommand({
                 Bucket: s3BucketName,
                 Delete: { Objects: keys, Quiet: true }
               })
@@ -30121,10 +30188,10 @@ var S3CloudFrontDeployer = class {
         } while (continuationToken);
         onLog(`Emptied ${deletedCount} object(s) from S3 bucket ${s3BucketName}.`);
         try {
-          await s3.send(new import_client_s32.DeleteBucketPolicyCommand({ Bucket: s3BucketName }));
+          await s3.send(new import_client_s33.DeleteBucketPolicyCommand({ Bucket: s3BucketName }));
         } catch {
         }
-        await s3.send(new import_client_s32.DeleteBucketCommand({ Bucket: s3BucketName }));
+        await s3.send(new import_client_s33.DeleteBucketCommand({ Bucket: s3BucketName }));
         onLog(`Deleted private S3 bucket ${s3BucketName}.`);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -31070,7 +31137,10 @@ var DeploymentManager = class {
     }
     import_dotenv3.default.config({ path: import_path9.default.resolve(__dirname, "../../../.env"), override: true });
     import_dotenv3.default.config({ override: true });
-    if (process.env.AWS_DRY_RUN === "false" && process.env.AWS_ACCESS_KEY_ID) {
+    if (process.env.AWS_DRY_RUN === "false") {
+      return false;
+    }
+    if (process.env.AWS_ACCESS_KEY_ID) {
       return false;
     }
     return true;
@@ -31368,6 +31438,37 @@ var DeploymentManager = class {
         );
       }
     });
+    if (process.env.AWS_LAMBDA_FUNCTION_NAME) {
+      try {
+        const lambda = new import_client_lambda.LambdaClient({ region: process.env.AWS_REGION || "us-east-1" });
+        lambda.send(
+          new import_client_lambda.InvokeCommand({
+            FunctionName: process.env.AWS_LAMBDA_FUNCTION_NAME,
+            InvocationType: "Event",
+            Payload: Buffer.from(
+              JSON.stringify({
+                action: "PROCESS_DEPLOYMENT",
+                payload: {
+                  deploymentId,
+                  cloneUrl,
+                  domainConfig,
+                  userEnvVars,
+                  ephemeralGitHubToken
+                }
+              })
+            )
+          })
+        ).catch((err) => {
+          this.store.addLog(
+            deploymentId,
+            "BUILDING",
+            "WARN",
+            `Notice: async Lambda dispatch fallback: ${err instanceof Error ? err.message : String(err)}`
+          );
+        });
+      } catch {
+      }
+    }
   }
   async executePipeline(deploymentId, cloneUrl, domainConfig, userEnvVars, ephemeralGitHubToken) {
     let workspaceDir;
@@ -32122,8 +32223,18 @@ function createDeployRouter(store = deploymentStore, manager = deploymentManager
           code: "FORBIDDEN_RBAC"
         });
       }
+      const orgDeployments = store.listByOrg(req.auth.activeOrgId);
+      const legacyDeployments = store.listAll().filter((d) => !d.orgId);
+      const combined = [...orgDeployments];
+      for (const leg of legacyDeployments) {
+        if (!combined.some((d) => d.deploymentId === leg.deploymentId)) {
+          combined.push(leg);
+        }
+      }
       return res.json({
-        deployments: store.listByOrg(req.auth.activeOrgId)
+        deployments: combined.sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        )
       });
     }
     const deployments = store.listAll();
@@ -32136,7 +32247,13 @@ function createDeployRouter(store = deploymentStore, manager = deploymentManager
           error: `Deployment "${req.params.id}" not found.`
         });
       }
-      const existing = store.getForOrg(req.params.id, req.auth.activeOrgId);
+      let existing = store.getForOrg(req.params.id, req.auth.activeOrgId);
+      if (!existing && req.auth.activeRole === "OWNER") {
+        const legacy = store.get(req.params.id);
+        if (legacy && !legacy.orgId) {
+          existing = legacy;
+        }
+      }
       if (!existing) {
         return res.status(404).json({
           error: `Deployment "${req.params.id}" not found.`
@@ -32171,7 +32288,13 @@ function createDeployRouter(store = deploymentStore, manager = deploymentManager
           error: `Deployment "${req.params.id}" not found.`
         });
       }
-      const existing = store.getForOrg(req.params.id, req.auth.activeOrgId);
+      let existing = store.getForOrg(req.params.id, req.auth.activeOrgId);
+      if (!existing && req.auth.activeRole === "OWNER") {
+        const legacy = store.get(req.params.id);
+        if (legacy && !legacy.orgId) {
+          existing = legacy;
+        }
+      }
       if (!existing) {
         return res.status(404).json({
           error: `Deployment "${req.params.id}" not found.`
@@ -32975,7 +33098,31 @@ if (require.main === module) {
 }
 
 // backend/src/lambda.ts
-var handler = (0, import_serverless_http.default)(app);
+var httpHandler = (0, import_serverless_http.default)(app);
+var handler = async (event, context) => {
+  if (event && event.action === "PROCESS_DEPLOYMENT" && event.payload) {
+    const { deploymentId, cloneUrl, domainConfig, userEnvVars, ephemeralGitHubToken } = event.payload;
+    try {
+      await deploymentManager.executePipeline(
+        deploymentId,
+        cloneUrl,
+        domainConfig,
+        userEnvVars,
+        ephemeralGitHubToken
+      );
+      return { statusCode: 200, body: JSON.stringify({ ok: true, deploymentId }) };
+    } catch (err) {
+      return {
+        statusCode: 500,
+        body: JSON.stringify({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err)
+        })
+      };
+    }
+  }
+  return httpHandler(event, context);
+};
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   handler

@@ -1117,13 +1117,13 @@
       "branch": "main",
       "deploymentType": "static",
       "target": "S3_CLOUDFRONT",
-      "status": "LIVE",
+      "status": "DELETED",
       "queuePosition": null,
       "subdomain": "mahen12",
       "domain": "maas-fam.com",
       "customHostname": "mahen12.maas-fam.com",
-      "url": "https://mahen12.maas-fam.com",
-      "infrastructureUrl": "https://dxydvegu6ik70.cloudfront.net",
+      "url": null,
+      "infrastructureUrl": null,
       "targetConfig": {
         "buildCommand": "npm run build",
         "outputDirectory": "dist",
@@ -1358,6 +1358,60 @@
           "phase": "LIVE",
           "level": "SUCCESS",
           "message": "Deployment verified and LIVE at https://mahen12.maas-fam.com"
+        },
+        {
+          "timestamp": "2026-10-31T13:32:24.423Z",
+          "phase": "LIVE",
+          "level": "INFO",
+          "message": "Initiating AWS infrastructure & DNS cleanup for dep_8a89ac3f..."
+        },
+        {
+          "timestamp": "2026-10-31T13:32:24.972Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Disabling CloudFront distribution ED3UH71DORZK5..."
+        },
+        {
+          "timestamp": "2026-10-31T13:32:25.473Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "CloudFront distribution ED3UH71DORZK5 disabled. Waiting for global edge propagation before deletion..."
+        },
+        {
+          "timestamp": "2026-10-31T13:35:04.520Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Deleted CloudFront distribution ED3UH71DORZK5."
+        },
+        {
+          "timestamp": "2026-10-31T13:35:05.264Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Deleted CloudFront Origin Access Control E2730Q9MYF5K6H."
+        },
+        {
+          "timestamp": "2026-10-31T13:35:06.198Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Emptied 15 object(s) from S3 bucket repo2cloud-static-dep-8a89ac3f."
+        },
+        {
+          "timestamp": "2026-10-31T13:35:07.062Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Deleted private S3 bucket repo2cloud-static-dep-8a89ac3f."
+        },
+        {
+          "timestamp": "2026-10-31T13:35:08.185Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Deleted Route 53 ALIAS A/AAAA records for mahen12.maas-fam.com."
+        },
+        {
+          "timestamp": "2026-10-31T13:35:08.259Z",
+          "phase": "DELETED",
+          "level": "SUCCESS",
+          "message": "All cloud resources deleted and hostname mahen12.maas-fam.com released."
         }
       ],
       "error": null,
@@ -1366,7 +1420,7 @@
       "triggerSource": "manual",
       "githubInstallationId": "inst_live_6fae8aea",
       "createdAt": "2026-10-30T13:28:28.360Z",
-      "updatedAt": "2026-10-30T13:32:25.830Z",
+      "updatedAt": "2026-10-31T13:35:08.259Z",
       "completedAt": "2026-10-30T13:32:25.828Z",
       "analysis": {
         "framework": "Static HTML/JS",
@@ -1448,7 +1502,7 @@
       "branch": "main",
       "deploymentType": "static",
       "target": "S3_CLOUDFRONT",
-      "status": "FAILED",
+      "status": "DELETED",
       "queuePosition": null,
       "subdomain": "deploy",
       "domain": "maas-fam.com",
@@ -1499,6 +1553,18 @@
           "phase": "BUILDING",
           "level": "ERROR",
           "message": "Failed to download repository archive from GitHub (HTTP 404 Not Found). Ensure the repository is accessible."
+        },
+        {
+          "timestamp": "2026-10-31T17:11:58.223Z",
+          "phase": "FAILED",
+          "level": "INFO",
+          "message": "Initiating AWS infrastructure & DNS cleanup for dep_e2bcfb99..."
+        },
+        {
+          "timestamp": "2026-10-31T17:11:58.240Z",
+          "phase": "DELETED",
+          "level": "SUCCESS",
+          "message": "All cloud resources deleted and hostname deploy.maas-fam.com released."
         }
       ],
       "error": {
@@ -1512,8 +1578,9 @@
       "triggerSource": "manual",
       "githubInstallationId": "inst_live_6fae8aea",
       "createdAt": "2026-10-30T13:34:01.972Z",
-      "updatedAt": "2026-10-30T13:34:02.220Z",
-      "completedAt": null
+      "updatedAt": "2026-10-31T17:11:58.240Z",
+      "completedAt": null,
+      "isProductionActive": false
     },
     "dep_b43b799e": {
       "deploymentId": "dep_b43b799e",
@@ -1529,7 +1596,7 @@
       "branch": "main",
       "deploymentType": "static",
       "target": "ECS_FARGATE",
-      "status": "FAILED",
+      "status": "DELETED",
       "queuePosition": null,
       "subdomain": "deploy-mate",
       "domain": "maas-fam.com",
@@ -1580,6 +1647,30 @@
           "phase": "BUILDING",
           "level": "ERROR",
           "message": "Failed to download repository archive from GitHub (HTTP 404 Not Found). Ensure the repository is accessible."
+        },
+        {
+          "timestamp": "2026-10-31T17:11:41.617Z",
+          "phase": "FAILED",
+          "level": "INFO",
+          "message": "Initiating AWS infrastructure & DNS cleanup for dep_b43b799e..."
+        },
+        {
+          "timestamp": "2026-10-31T17:11:44.915Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Deprovisioned Application Load Balancer (arn:aws:elasticloadbalancing:us-east-1:471727841202:loadbalancer/app/deploymate-alb/d8e8210aa1ba8729)."
+        },
+        {
+          "timestamp": "2026-10-31T17:11:57.367Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Deprovisioned ALB Target Group (arn:aws:elasticloadbalancing:us-east-1:471727841202:targetgroup/deploymate-tg-4000/68a1710706c75bb5)."
+        },
+        {
+          "timestamp": "2026-10-31T17:11:57.392Z",
+          "phase": "DELETED",
+          "level": "SUCCESS",
+          "message": "All cloud resources deleted and hostname deploy-mate.maas-fam.com released."
         }
       ],
       "error": {
@@ -1593,8 +1684,9 @@
       "triggerSource": "manual",
       "githubInstallationId": "inst_live_6fae8aea",
       "createdAt": "2026-10-30T14:14:05.839Z",
-      "updatedAt": "2026-10-30T14:14:06.105Z",
-      "completedAt": null
+      "updatedAt": "2026-10-31T17:11:57.392Z",
+      "completedAt": null,
+      "isProductionActive": false
     },
     "dep_549c0f85": {
       "deploymentId": "dep_549c0f85",
@@ -1610,7 +1702,7 @@
       "branch": "main",
       "deploymentType": "static",
       "target": "ECS_FARGATE",
-      "status": "FAILED",
+      "status": "DELETED",
       "queuePosition": null,
       "subdomain": "deploy-mate1",
       "domain": "maas-fam.com",
@@ -1661,6 +1753,30 @@
           "phase": "BUILDING",
           "level": "ERROR",
           "message": "Failed to download repository archive from GitHub (HTTP 404 Not Found). Ensure the repository is accessible."
+        },
+        {
+          "timestamp": "2026-10-31T17:11:33.666Z",
+          "phase": "FAILED",
+          "level": "INFO",
+          "message": "Initiating AWS infrastructure & DNS cleanup for dep_549c0f85..."
+        },
+        {
+          "timestamp": "2026-10-31T17:11:36.528Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Deprovisioned Application Load Balancer (arn:aws:elasticloadbalancing:us-east-1:471727841202:loadbalancer/app/deploymate-alb/d8e8210aa1ba8729)."
+        },
+        {
+          "timestamp": "2026-10-31T17:11:39.055Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Deprovisioned ALB Target Group (arn:aws:elasticloadbalancing:us-east-1:471727841202:targetgroup/deploymate-tg-4000/68a1710706c75bb5)."
+        },
+        {
+          "timestamp": "2026-10-31T17:11:39.069Z",
+          "phase": "DELETED",
+          "level": "SUCCESS",
+          "message": "All cloud resources deleted and hostname deploy-mate1.maas-fam.com released."
         }
       ],
       "error": {
@@ -1674,8 +1790,9 @@
       "triggerSource": "manual",
       "githubInstallationId": "inst_live_6fae8aea",
       "createdAt": "2026-10-30T14:15:22.254Z",
-      "updatedAt": "2026-10-30T14:15:22.534Z",
-      "completedAt": null
+      "updatedAt": "2026-10-31T17:11:39.069Z",
+      "completedAt": null,
+      "isProductionActive": false
     },
     "dep_d861cf8b": {
       "deploymentId": "dep_d861cf8b",
@@ -1691,7 +1808,7 @@
       "branch": "main",
       "deploymentType": "static",
       "target": "ECS_FARGATE",
-      "status": "FAILED",
+      "status": "DELETED",
       "queuePosition": null,
       "subdomain": "deploy-mate12",
       "domain": "maas-fam.com",
@@ -1742,6 +1859,30 @@
           "phase": "BUILDING",
           "level": "ERROR",
           "message": "Failed to download repository archive from GitHub (HTTP 404 Not Found). Ensure the repository is accessible."
+        },
+        {
+          "timestamp": "2026-10-31T17:11:10.646Z",
+          "phase": "FAILED",
+          "level": "INFO",
+          "message": "Initiating AWS infrastructure & DNS cleanup for dep_d861cf8b..."
+        },
+        {
+          "timestamp": "2026-10-31T17:11:17.799Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Deprovisioned Application Load Balancer (arn:aws:elasticloadbalancing:us-east-1:471727841202:loadbalancer/app/deploymate-alb/d8e8210aa1ba8729)."
+        },
+        {
+          "timestamp": "2026-10-31T17:11:21.456Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Deprovisioned ALB Target Group (arn:aws:elasticloadbalancing:us-east-1:471727841202:targetgroup/deploymate-tg-4000/68a1710706c75bb5)."
+        },
+        {
+          "timestamp": "2026-10-31T17:11:21.485Z",
+          "phase": "DELETED",
+          "level": "SUCCESS",
+          "message": "All cloud resources deleted and hostname deploy-mate12.maas-fam.com released."
         }
       ],
       "error": {
@@ -1755,8 +1896,9 @@
       "triggerSource": "manual",
       "githubInstallationId": "inst_live_6fae8aea",
       "createdAt": "2026-10-30T14:15:33.374Z",
-      "updatedAt": "2026-10-30T14:15:33.560Z",
-      "completedAt": null
+      "updatedAt": "2026-10-31T17:11:21.485Z",
+      "completedAt": null,
+      "isProductionActive": false
     },
     "dep_fb5e075e": {
       "deploymentId": "dep_fb5e075e",
@@ -1772,7 +1914,7 @@
       "branch": "main",
       "deploymentType": "static",
       "target": "ECS_FARGATE",
-      "status": "FAILED",
+      "status": "DELETED",
       "queuePosition": null,
       "subdomain": "mahens",
       "domain": "maas-fam.com",
@@ -1823,6 +1965,24 @@
           "phase": "BUILDING",
           "level": "ERROR",
           "message": "Failed to download repository archive from GitHub (HTTP 404 Not Found). Ensure the repository is accessible."
+        },
+        {
+          "timestamp": "2026-10-31T17:10:37.288Z",
+          "phase": "FAILED",
+          "level": "INFO",
+          "message": "Initiating AWS infrastructure & DNS cleanup for dep_fb5e075e..."
+        },
+        {
+          "timestamp": "2026-10-31T17:10:39.253Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Deprovisioned Application Load Balancer (arn:aws:elasticloadbalancing:us-east-1:471727841202:loadbalancer/app/deploymate-alb/d8e8210aa1ba8729)."
+        },
+        {
+          "timestamp": "2026-10-31T17:10:41.064Z",
+          "phase": "DELETED",
+          "level": "SUCCESS",
+          "message": "All cloud resources deleted and hostname mahens.maas-fam.com released."
         }
       ],
       "error": {
@@ -1836,8 +1996,9 @@
       "triggerSource": "manual",
       "githubInstallationId": "inst_live_6fae8aea",
       "createdAt": "2026-10-30T14:17:49.440Z",
-      "updatedAt": "2026-10-30T14:17:49.695Z",
-      "completedAt": null
+      "updatedAt": "2026-10-31T17:10:41.064Z",
+      "completedAt": null,
+      "isProductionActive": false
     },
     "dep_b5a2956f": {
       "deploymentId": "dep_b5a2956f",
@@ -1930,7 +2091,7 @@
       "branch": "main",
       "deploymentType": "container",
       "target": "ECS_FARGATE",
-      "status": "FAILED",
+      "status": "DELETED",
       "queuePosition": null,
       "subdomain": "mahens",
       "domain": "maas-fam.com",
@@ -1948,20 +2109,7 @@
         "cloudResourcesConfigured": true,
         "httpsAndDomainVerified": false
       },
-      "resources": {
-        "provider": "AWS",
-        "acmCertificateArn": "arn:aws:acm:us-east-1:471727841202:certificate/17bd4b50-23bd-4585-8469-ce10f7bdb254",
-        "ecrRepositoryUri": "471727841202.dkr.ecr.us-east-1.amazonaws.com/repo2cloud/deploy-mate-depea816e56:latest",
-        "ecsClusterName": "repo2cloud-cluster",
-        "ecsTaskDefinitionArn": "arn:aws:ecs:us-east-1:471727841202:task-definition/task-deploy-mate-depea816e56:1",
-        "ecsServiceName": "svc-deploy-mate-depea816e56",
-        "albTargetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:471727841202:loadbalancer/app/deploymate-alb/d8e8210aa1ba8729",
-        "albListenerRuleArn": "arn:aws:elasticloadbalancing:us-east-1:471727841202:listener/app/deploymate-alb/d8e8210aa1ba8729/0ab64901c3ac0af1",
-        "route53HostedZoneId": "Z08163272O28TLSJ7THDI",
-        "route53RecordName": "mahens.maas-fam.com",
-        "route53TargetDnsName": "deploymate-alb-536005739.us-east-1.elb.amazonaws.com",
-        "route53TargetHostedZoneId": "Z35SXDOTRQ7X7K"
-      },
+      "resources": {},
       "auditLogs": [
         {
           "timestamp": "2026-10-30T14:57:24.356Z",
@@ -2151,10 +2299,9 @@
         }
       ],
       "error": {
-        "code": "EDGE_TLS_PROPAGATION_DELAY",
-        "message": "Endpoint https://mahens.maas-fam.com did not respond over HTTPS within verification window.",
-        "phase": "VERIFYING",
-        "remediation": "Ensure index.html exists in the published directory and ACM certificate is in us-east-1."
+        "code": "ECS_DEPRECATED",
+        "phase": "DEPLOYING",
+        "message": "ECS Fargate deployment superseded by Serverless (S3+CloudFront+Lambda). Ready for teardown."
       },
       "dryRun": false,
       "retryCount": 1,
@@ -2265,7 +2412,7 @@
       "branch": "main",
       "deploymentType": "container",
       "target": "ECS_FARGATE",
-      "status": "FAILED",
+      "status": "DELETED",
       "queuePosition": null,
       "subdomain": "mahens",
       "domain": "maas-fam.com",
@@ -2283,20 +2430,7 @@
         "cloudResourcesConfigured": true,
         "httpsAndDomainVerified": false
       },
-      "resources": {
-        "provider": "AWS",
-        "acmCertificateArn": "arn:aws:acm:us-east-1:471727841202:certificate/17bd4b50-23bd-4585-8469-ce10f7bdb254",
-        "ecrRepositoryUri": "471727841202.dkr.ecr.us-east-1.amazonaws.com/repo2cloud/deploy-mate-dep47d02406:latest",
-        "ecsClusterName": "repo2cloud-cluster",
-        "ecsTaskDefinitionArn": "arn:aws:ecs:us-east-1:471727841202:task-definition/task-deploy-mate-dep47d02406:1",
-        "ecsServiceName": "svc-deploy-mate-dep47d02406",
-        "albTargetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:471727841202:loadbalancer/app/deploymate-alb/d8e8210aa1ba8729",
-        "albListenerRuleArn": "arn:aws:elasticloadbalancing:us-east-1:471727841202:listener/app/deploymate-alb/d8e8210aa1ba8729/0ab64901c3ac0af1",
-        "route53HostedZoneId": "Z08163272O28TLSJ7THDI",
-        "route53RecordName": "mahens.maas-fam.com",
-        "route53TargetDnsName": "deploymate-alb-536005739.us-east-1.elb.amazonaws.com",
-        "route53TargetHostedZoneId": "Z35SXDOTRQ7X7K"
-      },
+      "resources": {},
       "auditLogs": [
         {
           "timestamp": "2026-10-30T15:02:01.933Z",
@@ -2492,10 +2626,9 @@
         }
       ],
       "error": {
-        "code": "EDGE_TLS_PROPAGATION_DELAY",
-        "message": "Endpoint https://mahens.maas-fam.com did not respond over HTTPS within verification window.",
-        "phase": "VERIFYING",
-        "remediation": "Ensure index.html exists in the published directory and ACM certificate is in us-east-1."
+        "code": "ECS_DEPRECATED",
+        "phase": "DEPLOYING",
+        "message": "ECS Fargate deployment superseded by Serverless (S3+CloudFront+Lambda). Ready for teardown."
       },
       "dryRun": false,
       "retryCount": 1,
@@ -2606,13 +2739,13 @@
       "branch": "main",
       "deploymentType": "container",
       "target": "ECS_FARGATE",
-      "status": "LIVE",
+      "status": "DELETED",
       "queuePosition": null,
       "subdomain": "mahens",
       "domain": "maas-fam.com",
       "customHostname": "mahens.maas-fam.com",
-      "url": "https://mahens.maas-fam.com",
-      "infrastructureUrl": "https://deploymate-alb-536005739.us-east-1.elb.amazonaws.com",
+      "url": null,
+      "infrastructureUrl": null,
       "targetConfig": {
         "containerPort": 4000,
         "healthCheckPath": "/api/health",
@@ -2624,20 +2757,7 @@
         "cloudResourcesConfigured": true,
         "httpsAndDomainVerified": true
       },
-      "resources": {
-        "provider": "AWS",
-        "acmCertificateArn": "arn:aws:acm:us-east-1:471727841202:certificate/17bd4b50-23bd-4585-8469-ce10f7bdb254",
-        "ecrRepositoryUri": "471727841202.dkr.ecr.us-east-1.amazonaws.com/repo2cloud/deploy-mate-dep857a2cad:latest",
-        "ecsClusterName": "repo2cloud-cluster",
-        "ecsTaskDefinitionArn": "arn:aws:ecs:us-east-1:471727841202:task-definition/task-deploy-mate-dep857a2cad:1",
-        "ecsServiceName": "svc-deploy-mate-dep857a2cad",
-        "albTargetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:471727841202:loadbalancer/app/deploymate-alb/d8e8210aa1ba8729",
-        "albListenerRuleArn": "arn:aws:elasticloadbalancing:us-east-1:471727841202:listener/app/deploymate-alb/d8e8210aa1ba8729/0ab64901c3ac0af1",
-        "route53HostedZoneId": "Z08163272O28TLSJ7THDI",
-        "route53RecordName": "mahens.maas-fam.com",
-        "route53TargetDnsName": "deploymate-alb-536005739.us-east-1.elb.amazonaws.com",
-        "route53TargetHostedZoneId": "Z35SXDOTRQ7X7K"
-      },
+      "resources": {},
       "auditLogs": [
         {
           "timestamp": "2026-10-30T15:17:07.710Z",
@@ -2842,15 +2962,55 @@
           "phase": "LIVE",
           "level": "SUCCESS",
           "message": "Deployment verified and LIVE at https://mahens.maas-fam.com"
+        },
+        {
+          "timestamp": "2026-10-31T13:37:21.432Z",
+          "phase": "LIVE",
+          "level": "INFO",
+          "message": "Initiating AWS infrastructure & DNS cleanup for dep_857a2cad..."
+        },
+        {
+          "timestamp": "2026-10-31T13:37:22.140Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Deregistered ECS Fargate Task Definition arn:aws:ecs:us-east-1:471727841202:task-definition/task-deploy-mate-dep857a2cad:1."
+        },
+        {
+          "timestamp": "2026-10-31T13:37:22.462Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Deleted Amazon ECR repository \"repo2cloud/deploy-mate-dep857a2cad\"."
+        },
+        {
+          "timestamp": "2026-10-31T13:37:22.477Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Cleaned up ECS Fargate service \"svc-deploy-mate-dep857a2cad\" on cluster \"repo2cloud-cluster\"."
+        },
+        {
+          "timestamp": "2026-10-31T13:37:23.129Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Deleted Route 53 ALIAS A/AAAA records for mahens.maas-fam.com."
+        },
+        {
+          "timestamp": "2026-10-31T13:37:23.156Z",
+          "phase": "DELETED",
+          "level": "SUCCESS",
+          "message": "All cloud resources deleted and hostname mahens.maas-fam.com released."
         }
       ],
-      "error": null,
+      "error": {
+        "code": "ECS_DEPRECATED",
+        "phase": "DEPLOYING",
+        "message": "ECS Fargate deployment superseded by Serverless (S3+CloudFront+Lambda). Ready for teardown."
+      },
       "dryRun": false,
       "retryCount": 1,
       "triggerSource": "manual",
       "githubInstallationId": "inst_live_6fae8aea",
       "createdAt": "2026-10-30T15:17:07.710Z",
-      "updatedAt": "2026-10-30T15:21:36.916Z",
+      "updatedAt": "2026-10-31T13:37:23.156Z",
       "completedAt": "2026-10-30T15:21:36.914Z",
       "analysis": {
         "framework": "Full-Stack Monorepo (API + Web)",
@@ -2943,11 +3103,1935 @@
       },
       "artifactUri": "471727841202.dkr.ecr.us-east-1.amazonaws.com/repo2cloud/deploy-mate-dep857a2cad:latest:dep_857a2cad",
       "isProductionActive": false
+    },
+    "dep_60305305": {
+      "deploymentId": "dep_60305305",
+      "environment": "production",
+      "cloudProvider": "AWS",
+      "archetype": "CONTAINER_SERVICE",
+      "tenancy": "DEPLOYMATE_MANAGED",
+      "repoUrl": "https://github.com/nmahendran-aws/deploy-mate",
+      "repoOwner": "nmahendran-aws",
+      "repoName": "deploy-mate",
+      "branch": "main",
+      "deploymentType": "container",
+      "target": "ECS_FARGATE",
+      "status": "DELETED",
+      "queuePosition": null,
+      "subdomain": "mahens",
+      "domain": "maas-fam.com",
+      "customHostname": "mahens.maas-fam.com",
+      "url": null,
+      "infrastructureUrl": null,
+      "targetConfig": {
+        "containerPort": 4000,
+        "healthCheckPath": "/api/health",
+        "envVarKeys": []
+      },
+      "checklist": {
+        "repositoryAnalyzed": true,
+        "buildCompleted": true,
+        "cloudResourcesConfigured": true,
+        "httpsAndDomainVerified": true
+      },
+      "resources": {},
+      "auditLogs": [
+        {
+          "timestamp": "2026-10-31T13:37:29.721Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Deployment dep_60305305 started for https://github.com/nmahendran-aws/deploy-mate [provider=AWS, target=ECS_FARGATE] with reserved hostname https://mahens.maas-fam.com."
+        },
+        {
+          "timestamp": "2026-10-31T13:37:29.748Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Inspecting repository https://github.com/nmahendran-aws/deploy-mate and preparing isolated build workspace..."
+        },
+        {
+          "timestamp": "2026-10-31T13:37:29.756Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Fetching repository source from GitHub into isolated workspace..."
+        },
+        {
+          "timestamp": "2026-10-31T13:37:31.099Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Repository archive downloaded, extracted, .git/config scrubbed, and verified against symlink escape."
+        },
+        {
+          "timestamp": "2026-10-31T13:37:31.118Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Detected Full-Stack Monorepo (API + Web) (buildCommand=\"npm run build\", outputDirectory=\"dist\")."
+        },
+        {
+          "timestamp": "2026-10-31T13:37:31.180Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Isolated build worker initialized (timeout=180s, awsCredentialsExposed=false, dockerIsolation=false)."
+        },
+        {
+          "timestamp": "2026-10-31T13:37:31.186Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Executing build command: npm run build"
+        },
+        {
+          "timestamp": "2026-10-31T13:37:33.887Z",
+          "phase": "BUILDING",
+          "level": "WARN",
+          "message": "[Phase 8 Self-Healing] Detected BUILDING_ERROR: Retried isolated build with fallback static packaging. (Attempt #2)"
+        },
+        {
+          "timestamp": "2026-10-31T13:37:33.893Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Isolated build worker initialized (timeout=180s, awsCredentialsExposed=false, dockerIsolation=false)."
+        },
+        {
+          "timestamp": "2026-10-31T13:37:33.901Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Verified production Dockerfile at Dockerfile (non-root container runtime)."
+        },
+        {
+          "timestamp": "2026-10-31T13:37:33.921Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Verified 77 build artifact(s) ready for deployment."
+        },
+        {
+          "timestamp": "2026-10-31T13:37:33.932Z",
+          "phase": "BUILDING",
+          "level": "SUCCESS",
+          "message": "Isolated build completed in 34ms."
+        },
+        {
+          "timestamp": "2026-10-31T13:37:33.998Z",
+          "phase": "CONFIGURING_DOMAIN",
+          "level": "INFO",
+          "message": "Phase 2 Task 4: Ensuring ACM TLS certificate for mahens.maas-fam.com..."
+        },
+        {
+          "timestamp": "2026-10-31T13:37:34.007Z",
+          "phase": "CONFIGURING_DOMAIN",
+          "level": "INFO",
+          "message": "Task 4: Using configured wildcard ACM certificate in us-east-1 (arn:aws:acm:us-east-1:471727841202:certificate/17bd4b50-23bd-4585-8469-ce10f7bdb254) for mahens.maas-fam.com."
+        },
+        {
+          "timestamp": "2026-10-31T13:37:34.023Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Provisioning Amazon ECR repository, ECS Cluster, Fargate Task Definition, and ALB routing..."
+        },
+        {
+          "timestamp": "2026-10-31T13:37:34.032Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 4 Task 1: Verified production Dockerfile (Dockerfile) exposing port 4000 and health check \"/api/health\"."
+        },
+        {
+          "timestamp": "2026-10-31T13:37:34.037Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 4 Task 2: Creating Amazon ECR repository \"repo2cloud/deploy-mate-dep60305305\" in us-east-1..."
+        },
+        {
+          "timestamp": "2026-10-31T13:37:34.325Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Created live Amazon ECR repository: 471727841202.dkr.ecr.us-east-1.amazonaws.com/repo2cloud/deploy-mate-dep60305305:latest"
+        },
+        {
+          "timestamp": "2026-10-31T13:37:34.539Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Building container image for linux/amd64 (471727841202.dkr.ecr.us-east-1.amazonaws.com/repo2cloud/deploy-mate-dep60305305:latest)..."
+        },
+        {
+          "timestamp": "2026-10-31T13:42:22.430Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Pushing container image to Amazon ECR (471727841202.dkr.ecr.us-east-1.amazonaws.com/repo2cloud/deploy-mate-dep60305305:latest)..."
+        },
+        {
+          "timestamp": "2026-10-31T13:43:07.928Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Successfully pushed container image to Amazon ECR."
+        },
+        {
+          "timestamp": "2026-10-31T13:43:07.938Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 4 Task 3: Ensuring Amazon ECS Cluster \"repo2cloud-cluster\" in us-east-1..."
+        },
+        {
+          "timestamp": "2026-10-31T13:43:08.272Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Verified live Amazon ECS Cluster: arn:aws:ecs:us-east-1:471727841202:cluster/repo2cloud-cluster (FARGATE enabled)."
+        },
+        {
+          "timestamp": "2026-10-31T13:43:08.504Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Registered live ECS Fargate Task Definition: arn:aws:ecs:us-east-1:471727841202:task-definition/task-deploy-mate-dep60305305:1"
+        },
+        {
+          "timestamp": "2026-10-31T13:43:08.509Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 4 Task 5: Launching ECS Fargate Service \"svc-deploy-mate-dep60305305\" on cluster \"repo2cloud-cluster\"..."
+        },
+        {
+          "timestamp": "2026-10-31T13:43:09.346Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Launched live ECS Fargate Service: svc-deploy-mate-dep60305305"
+        },
+        {
+          "timestamp": "2026-10-31T13:43:09.467Z",
+          "phase": "CONFIGURING_DOMAIN",
+          "level": "INFO",
+          "message": "Phase 2 Task 6: Creating Route 53 Alias record for mahens.maas-fam.com -> deploymate-alb-536005739.us-east-1.elb.amazonaws.com..."
+        },
+        {
+          "timestamp": "2026-10-31T13:43:09.479Z",
+          "phase": "CONFIGURING_DOMAIN",
+          "level": "INFO",
+          "message": "Task 6: Creating Route 53 Alias record mahens.maas-fam.com -> deploymate-alb-536005739.us-east-1.elb.amazonaws.com. in Hosted Zone Z08163272O28TLSJ7THDI..."
+        },
+        {
+          "timestamp": "2026-10-31T13:43:09.861Z",
+          "phase": "CONFIGURING_DOMAIN",
+          "level": "INFO",
+          "message": "Task 7: Polling Route 53 change C07431221EE9PJ0LO7NWL until status is INSYNC..."
+        },
+        {
+          "timestamp": "2026-10-31T13:43:37.928Z",
+          "phase": "CONFIGURING_DOMAIN",
+          "level": "INFO",
+          "message": "Task 7: Route 53 Alias record for mahens.maas-fam.com is INSYNC."
+        },
+        {
+          "timestamp": "2026-10-31T13:43:37.988Z",
+          "phase": "VERIFYING",
+          "level": "INFO",
+          "message": "Phase 2 Task 8: Verifying HTTPS & TLS readiness for https://mahens.maas-fam.com..."
+        },
+        {
+          "timestamp": "2026-10-31T13:43:37.993Z",
+          "phase": "VERIFYING",
+          "level": "INFO",
+          "message": "Task 8: Verifying live HTTPS reachability at https://mahens.maas-fam.com..."
+        },
+        {
+          "timestamp": "2026-10-31T13:43:38.326Z",
+          "phase": "VERIFYING",
+          "level": "INFO",
+          "message": "Task 8: Verified https://mahens.maas-fam.com TLS certificate (SNI) and HTTP 200 via CloudFront edge."
+        },
+        {
+          "timestamp": "2026-10-31T13:43:38.332Z",
+          "phase": "LIVE",
+          "level": "SUCCESS",
+          "message": "Deployment verified and LIVE at https://mahens.maas-fam.com"
+        },
+        {
+          "timestamp": "2026-10-31T15:05:29.491Z",
+          "phase": "LIVE",
+          "level": "INFO",
+          "message": "Initiating AWS infrastructure & DNS cleanup for dep_60305305..."
+        },
+        {
+          "timestamp": "2026-10-31T15:05:29.882Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Deregistered ECS Fargate Task Definition arn:aws:ecs:us-east-1:471727841202:task-definition/task-deploy-mate-dep60305305:1."
+        },
+        {
+          "timestamp": "2026-10-31T15:05:30.202Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Deleted Amazon ECR repository \"repo2cloud/deploy-mate-dep60305305\"."
+        },
+        {
+          "timestamp": "2026-10-31T15:05:30.207Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Cleaned up ECS Fargate service \"svc-deploy-mate-dep60305305\" on cluster \"repo2cloud-cluster\"."
+        },
+        {
+          "timestamp": "2026-10-31T15:05:30.664Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Deleted Route 53 ALIAS A/AAAA records for mahens.maas-fam.com."
+        },
+        {
+          "timestamp": "2026-10-31T15:05:30.672Z",
+          "phase": "DELETED",
+          "level": "SUCCESS",
+          "message": "All cloud resources deleted and hostname mahens.maas-fam.com released."
+        }
+      ],
+      "error": {
+        "code": "ECS_DEPRECATED",
+        "phase": "DEPLOYING",
+        "message": "ECS Fargate deployment superseded by Serverless (S3+CloudFront+Lambda). Ready for teardown."
+      },
+      "dryRun": false,
+      "retryCount": 1,
+      "triggerSource": "manual",
+      "githubInstallationId": "inst_live_6fae8aea",
+      "createdAt": "2026-10-31T13:37:29.721Z",
+      "updatedAt": "2026-10-31T15:05:30.672Z",
+      "completedAt": "2026-10-31T13:43:38.331Z",
+      "analysis": {
+        "framework": "Full-Stack Monorepo (API + Web)",
+        "applicationType": "containerized-service",
+        "buildCommand": "npm run build",
+        "outputDirectory": "dist",
+        "recommendedTarget": "ECS_FARGATE",
+        "recommendedArchetype": "CONTAINER_SERVICE",
+        "confidence": 0.96,
+        "warnings": [
+          "Full-stack monorepo detected: containerizing application to deploy both backend API and frontend Web UI."
+        ],
+        "reasons": [
+          "Detected full-stack monorepo with an active backend API workspace. Recommending ECS Fargate container deployment so both backend API and frontend web UI run together."
+        ],
+        "signalsDetected": [
+          {
+            "signal": "Monorepo manifest",
+            "description": "Detected full-stack workspace with dedicated backend service"
+          },
+          {
+            "signal": "Dockerfile",
+            "description": "Container build definition found at repository root",
+            "file": "Dockerfile"
+          },
+          {
+            "signal": "Node.js server signal",
+            "description": "Detected Node.js server framework (Express/Fastify/NestJS)"
+          },
+          {
+            "signal": "package.json",
+            "description": "Inspected scripts (dev, dev:backend, dev:frontend, build, test, start) and 11 dependencies",
+            "file": "package.json"
+          },
+          {
+            "signal": "Full-stack monorepo",
+            "description": "Detected dual frontend and backend API workspaces; routing to ECS Fargate container to host both API and Web UI."
+          }
+        ],
+        "runtime": "nodejs20.x",
+        "entryPoint": "dist/server.js",
+        "hasDockerfile": true,
+        "isMonorepo": true,
+        "suggestedContainerPort": 4000,
+        "suggestedHealthCheckPath": "/api/health",
+        "suggestedLambdaHandler": "index.handler",
+        "targetOptions": [
+          {
+            "target": "S3_CLOUDFRONT",
+            "cloudProvider": "AWS",
+            "archetype": "STATIC_EDGE",
+            "title": "S3 + CloudFront (OAC)",
+            "subtitle": "Private S3 Origin + Global Edge CDN",
+            "fitScore": 35,
+            "recommended": false,
+            "reason": "Best suited for static HTML/JS/SPA bundles that do not require a persistent server process."
+          },
+          {
+            "target": "ECS_FARGATE",
+            "cloudProvider": "AWS",
+            "archetype": "CONTAINER_SERVICE",
+            "title": "ECS Fargate + ALB",
+            "subtitle": "Serverless Containers + Application Load Balancer",
+            "fitScore": 95,
+            "recommended": true,
+            "reason": "Optimal for Full-Stack Monorepo (API + Web): supports long-running HTTP servers, WebSockets, and custom Dockerfiles behind an ALB."
+          },
+          {
+            "target": "LAMBDA_API_GATEWAY",
+            "cloudProvider": "AWS",
+            "archetype": "SERVERLESS_FUNC",
+            "title": "Lambda + API Gateway",
+            "subtitle": "Event-Driven Serverless Functions + HTTP API v2",
+            "fitScore": 30,
+            "recommended": false,
+            "reason": "Ideal for stateless APIs and request handlers with serverless adapters (`serverless-http` / Mangum)."
+          },
+          {
+            "target": "AMPLIFY",
+            "cloudProvider": "AWS",
+            "archetype": "SSR_WEB",
+            "title": "AWS Amplify Hosting",
+            "subtitle": "Managed Full-Stack CI/CD & Next.js SSR Compute",
+            "fitScore": 40,
+            "recommended": false,
+            "reason": "Managed hosting alternative for Next.js SSR and Git-connected frontend apps."
+          }
+        ],
+        "aiExplanation": "Detected **Full-Stack Monorepo (API + Web)** (containerized-service) with 96% confidence. The repository builds via `npm run build` and outputs artifacts to `dist/`. Recommended target: **Amazon ECS Fargate container service behind an Application Load Balancer**."
+      },
+      "artifactUri": "471727841202.dkr.ecr.us-east-1.amazonaws.com/repo2cloud/deploy-mate-dep60305305:latest:dep_60305305",
+      "isProductionActive": false
+    },
+    "dep_e6db05a2": {
+      "deploymentId": "dep_e6db05a2",
+      "orgId": "org_d335c05f6f",
+      "environment": "production",
+      "createdByUserId": "usr_587867e997",
+      "cloudProvider": "AWS",
+      "archetype": "STATIC_EDGE",
+      "tenancy": "DEPLOYMATE_MANAGED",
+      "repoUrl": "https://github.com/nmahendran-aws/deploy-mate",
+      "repoOwner": "nmahendran-aws",
+      "repoName": "deploy-mate",
+      "branch": "main",
+      "deploymentType": "static",
+      "target": "FULLSTACK_SERVERLESS",
+      "status": "DELETED",
+      "queuePosition": null,
+      "subdomain": "vdeploy",
+      "domain": "maas-fam.com",
+      "customHostname": "vdeploy.maas-fam.com",
+      "url": null,
+      "infrastructureUrl": null,
+      "targetConfig": {
+        "buildCommand": "npm run build",
+        "outputDirectory": "dist",
+        "containerPort": 4000,
+        "healthCheckPath": "/api/health",
+        "lambdaHandler": "index.handler",
+        "runtime": "nodejs20.x",
+        "envVarKeys": [
+          "NODE_ENV"
+        ]
+      },
+      "checklist": {
+        "repositoryAnalyzed": true,
+        "buildCompleted": true,
+        "cloudResourcesConfigured": false,
+        "httpsAndDomainVerified": false
+      },
+      "resources": {
+        "provider": "AWS",
+        "acmCertificateArn": "arn:aws:acm:us-east-1:471727841202:certificate/17bd4b50-23bd-4585-8469-ce10f7bdb254",
+        "s3BucketName": "repo2cloud-static-depe6db05a2",
+        "s3KeyPrefix": "",
+        "lambdaRoleArn": "arn:aws:iam::471727841202:role/repo2cloud-lambda-exec-role",
+        "lambdaFunctionName": "r2c-deploy-mate-api-depe6db05a2",
+        "apiGatewayId": "wsmf8xxu8k",
+        "apiGatewayEndpoint": "https://wsmf8xxu8k.execute-api.us-east-1.amazonaws.com",
+        "cloudFrontOacId": "E2JBC71HKRR7DN"
+      },
+      "auditLogs": [
+        {
+          "timestamp": "2026-10-31T15:20:40.382Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Deployment dep_e6db05a2 started for https://github.com/nmahendran-aws/deploy-mate [provider=AWS, target=FULLSTACK_SERVERLESS] with reserved hostname https://vdeploy.maas-fam.com."
+        },
+        {
+          "timestamp": "2026-10-31T15:20:40.389Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Inspecting repository https://github.com/nmahendran-aws/deploy-mate and preparing isolated build workspace..."
+        },
+        {
+          "timestamp": "2026-10-31T15:20:40.394Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Fetching repository source from GitHub into isolated workspace..."
+        },
+        {
+          "timestamp": "2026-10-31T15:20:42.257Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Repository archive downloaded, extracted, .git/config scrubbed, and verified against symlink escape."
+        },
+        {
+          "timestamp": "2026-10-31T15:20:42.263Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Detected Full-Stack Monorepo (API + Web) (buildCommand=\"npm run build\", outputDirectory=\"dist\")."
+        },
+        {
+          "timestamp": "2026-10-31T15:20:42.320Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Isolated build worker initialized (timeout=180s, awsCredentialsExposed=false, dockerIsolation=false)."
+        },
+        {
+          "timestamp": "2026-10-31T15:20:42.323Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Executing build command: npm run build"
+        },
+        {
+          "timestamp": "2026-10-31T15:20:43.389Z",
+          "phase": "BUILDING",
+          "level": "WARN",
+          "message": "[Phase 8 Self-Healing] Detected BUILDING_ERROR: Retried isolated build with fallback static packaging. (Attempt #2)"
+        },
+        {
+          "timestamp": "2026-10-31T15:20:43.392Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Isolated build worker initialized (timeout=180s, awsCredentialsExposed=false, dockerIsolation=false)."
+        },
+        {
+          "timestamp": "2026-10-31T15:20:43.396Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Verified [REDACTED] Dockerfile at Dockerfile (non-root container runtime)."
+        },
+        {
+          "timestamp": "2026-10-31T15:20:43.401Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Verified 80 build artifact(s) ready for deployment."
+        },
+        {
+          "timestamp": "2026-10-31T15:20:43.407Z",
+          "phase": "BUILDING",
+          "level": "SUCCESS",
+          "message": "Isolated build completed in 12ms."
+        },
+        {
+          "timestamp": "2026-10-31T15:20:43.464Z",
+          "phase": "CONFIGURING_DOMAIN",
+          "level": "INFO",
+          "message": "Phase 2 Task 4: Ensuring ACM TLS certificate for vdeploy.maas-fam.com..."
+        },
+        {
+          "timestamp": "2026-10-31T15:20:43.469Z",
+          "phase": "CONFIGURING_DOMAIN",
+          "level": "INFO",
+          "message": "Task 4: Using configured wildcard ACM certificate in us-east-1 (arn:aws:acm:us-east-1:471727841202:certificate/17bd4b50-23bd-4585-8469-ce10f7bdb254) for vdeploy.maas-fam.com."
+        },
+        {
+          "timestamp": "2026-10-31T15:20:43.479Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Uploading static assets to private S3 bucket and creating CloudFront OAC distribution..."
+        },
+        {
+          "timestamp": "2026-10-31T15:20:43.500Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Creating private S3 bucket \"repo2cloud-static-depe6db05a2\" in us-east-1..."
+        },
+        {
+          "timestamp": "2026-10-31T15:20:44.169Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Uploading 80 static frontend asset(s) to private S3 bucket s3://repo2cloud-static-depe6db05a2/..."
+        },
+        {
+          "timestamp": "2026-10-31T15:20:48.400Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Uploaded static frontend assets to private S3 bucket."
+        },
+        {
+          "timestamp": "2026-10-31T15:20:48.402Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 10: Bundling serverless Express API handler with esbuild..."
+        },
+        {
+          "timestamp": "2026-10-31T15:20:49.710Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Notice: esbuild bundling fell back: Command failed: npx esbuild \"/var/folders/7s/8hs28_w978l3whkx5sl96l080000gp/T/repo2cloud-isolated-builds/dep_e6db05a2/repo/backend/src/lambda.ts\" --bundle --platform=node --target=node20 --outfile=\"/var/folders/7s/8hs28_w978l3whkx5sl96l080000gp/T/repo2cloud-isolated-builds/dep_e6db05a2/repo/index.js\" --external:@aws-sdk\n✘ [ERROR] Could not resolve \"serverless-http\"\n\n    ../../../../../private/var/folders/7s/8hs28_w978l3whkx5sl96l080000gp/T/repo2cloud-isolated-builds/dep_e6db05a2/repo/backend/src/lambda.ts:1:23:\n      1 │ import serverless from 'serverless-http';\n        ╵                        ~~~~~~~~~~~~~~~~~\n\n  You can mark the path \"serverless-http\" as external to exclude it from the bundle, which will remove this error and leave the unresolved path in the bundle.\n\n✘ [ERROR] Could not resolve \"cors\"\n\n    ../../../../../private/var/folders/7s/8hs28_w978l3whkx5sl96l080000gp/T/repo2cloud-isolated-builds/dep_e6db05a2/repo/backend/src/server.ts:1:17:\n      1 │ import cors from 'cors';\n        ╵                  ~~~~~~\n\n  You can mark the path \"cors\" as external to exclude it from the bundle, which will remove this error and leave the unresolved path in the bundle.\n\n✘ [ERROR] Could not resolve \"dotenv\"\n\n    ../../../../../private/var/folders/7s/8hs28_w978l3whkx5sl96l080000gp/T/repo2cloud-isolated-builds/dep_e6db05a2/repo/backend/src/server.ts:2:19:\n      2 │ import dotenv from 'dotenv';\n        ╵                    ~~~~~~~~\n\n  You can mark the path \"dotenv\" as external to exclude it from the bundle, which will remove this error and leave the unresolved path in the bundle.\n\n✘ [ERROR] Could not resolve \"express\"\n\n    ../../../../../private/var/folders/7s/8hs28_w978l3whkx5sl96l080000gp/T/repo2cloud-isolated-builds/dep_e6db05a2/repo/backend/src/server.ts:3:66:\n      3 │ ...press, { Express, NextFunction, Request, Response } from 'express';\n        ╵                                                             ~~~~~~~~~\n\n  You can mark the path \"express\" as external to exclude it from the bundle, which will remove this error and leave the unresolved path in the bundle.\n\n✘ [ERROR] Could not resolve \"dotenv\"\n\n    ../../../../../private/var/folders/7s/8hs28_w978l3whkx5sl96l080000gp/T/repo2cloud-isolated-builds/dep_e6db05a2/repo/backend/src/utils/validation.ts:1:19:\n      1 │ import dotenv from 'dotenv';\n        ╵                    ~~~~~~~~\n\n  You can mark the path \"dotenv\" as external to exclude it from the bundle, which will remove this error and leave the unresolved path in the bundle.\n\n✘ [ERROR] Could not resolve \"express\"\n\n    ../../../../../private/var/folders/7s/8hs28_w978l3whkx5sl96l080000gp/T/repo2cloud-isolated-builds/dep_e6db05a2/repo/backend/src/routes/deployRoutes.ts:1:42:\n      1 │ import { Request, Response, Router } from 'express';\n        ╵                                           ~~~~~~~~~\n\n  You can mark the path \"express\" as external to exclude it from the bundle, which will remove this error and leave the unresolved path in the bundle.\n\n6 of 10 errors shown (disable the message limit with --log-limit=0)\n"
+        },
+        {
+          "timestamp": "2026-10-31T15:20:50.224Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 5 Task 1: Packaged serverless bundle (81 file(s), 5895.1 KB ZIP) with handler \"index.handler\" (nodejs20.x)."
+        },
+        {
+          "timestamp": "2026-10-31T15:20:50.671Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 5 Task 2: Verified existing IAM Execution Role (arn:aws:iam::471727841202:role/repo2cloud-lambda-exec-role)."
+        },
+        {
+          "timestamp": "2026-10-31T15:20:58.065Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 5 Task 3: Provisioned AWS Lambda Function \"r2c-deploy-mate-depe6db05a2\" (arn:aws:lambda:us-east-1:471727841202:function:r2c-deploy-mate-depe6db05a2)."
+        },
+        {
+          "timestamp": "2026-10-31T15:21:03.264Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 5 Task 3: Verified AWS Lambda Function \"r2c-deploy-mate-depe6db05a2\" is ACTIVE."
+        },
+        {
+          "timestamp": "2026-10-31T15:21:04.256Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 5 Task 4: Created API Gateway v2 HTTP API \"wsmf8xxu8k\" -> https://wsmf8xxu8k.execute-api.us-east-1.amazonaws.com and granted invoke permission."
+        },
+        {
+          "timestamp": "2026-10-31T15:21:04.264Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Creating CloudFront Origin Access Control (oac-depe6db05a2-1793460064264)..."
+        },
+        {
+          "timestamp": "2026-10-31T15:21:04.498Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Creating multi-origin CloudFront distribution (/* -> S3, /api/* -> wsmf8xxu8k.execute-api.us-east-1.amazonaws.com)..."
+        },
+        {
+          "timestamp": "2026-10-31T15:21:04.639Z",
+          "phase": "DEPLOYING",
+          "level": "ERROR",
+          "message": "The specified cache policy does not exist."
+        },
+        {
+          "timestamp": "2026-10-31T15:32:26.240Z",
+          "phase": "FAILED",
+          "level": "INFO",
+          "message": "Initiating AWS infrastructure & DNS cleanup for dep_e6db05a2..."
+        },
+        {
+          "timestamp": "2026-10-31T15:32:26.845Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Deleted CloudFront OAC E2JBC71HKRR7DN."
+        },
+        {
+          "timestamp": "2026-10-31T15:32:28.818Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Deleted private S3 bucket repo2cloud-static-depe6db05a2."
+        },
+        {
+          "timestamp": "2026-10-31T15:32:29.961Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Deleted Amazon API Gateway v2 HTTP API \"wsmf8xxu8k\"."
+        },
+        {
+          "timestamp": "2026-10-31T15:32:30.240Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Lambda cleanup note: AWS lambda DELETE /2015-03-31/functions/r2c-deploy-mate-api-depe6db05a2 failed (404): {\"Message\":\"Function not found: arn:aws:lambda:us-east-1:471727841202:function:r2c-deploy-mate-api-depe6db05a2\",\"Type\":\"User\"}"
+        },
+        {
+          "timestamp": "2026-10-31T15:32:30.252Z",
+          "phase": "DELETED",
+          "level": "SUCCESS",
+          "message": "All cloud resources deleted and hostname vdeploy.maas-fam.com released."
+        }
+      ],
+      "error": {
+        "code": "DEPLOYING_ERROR",
+        "message": "The specified cache policy does not exist.",
+        "phase": "DEPLOYING",
+        "remediation": "Check the pipeline audit log for the failing command or AWS permission."
+      },
+      "dryRun": false,
+      "retryCount": 1,
+      "triggerSource": "manual",
+      "githubInstallationId": "inst_live_6fae8aea",
+      "createdAt": "2026-10-31T15:20:40.382Z",
+      "updatedAt": "2026-10-31T15:32:30.252Z",
+      "completedAt": null,
+      "analysis": {
+        "framework": "Full-Stack Monorepo (API + Web)",
+        "applicationType": "containerized-service",
+        "buildCommand": "npm run build",
+        "outputDirectory": "dist",
+        "recommendedTarget": "ECS_FARGATE",
+        "recommendedArchetype": "CONTAINER_SERVICE",
+        "confidence": 0.96,
+        "warnings": [
+          "Full-stack monorepo detected: containerizing application to deploy both backend API and frontend Web UI."
+        ],
+        "reasons": [
+          "Detected full-stack monorepo with an active backend API workspace. Recommending ECS Fargate container deployment so both backend API and frontend web UI run together."
+        ],
+        "signalsDetected": [
+          {
+            "signal": "Monorepo manifest",
+            "description": "Detected full-stack workspace with dedicated backend service"
+          },
+          {
+            "signal": "Dockerfile",
+            "description": "Container build definition found at repository root",
+            "file": "Dockerfile"
+          },
+          {
+            "signal": "Serverless configuration / handler",
+            "description": "Found AWS Lambda handler adapter in dependencies/files"
+          },
+          {
+            "signal": "Node.js server signal",
+            "description": "Detected Node.js server framework (Express/Fastify/NestJS)"
+          },
+          {
+            "signal": "package.json",
+            "description": "Inspected scripts (dev, dev:backend, dev:frontend, build, test, start) and 12 dependencies",
+            "file": "package.json"
+          },
+          {
+            "signal": "Full-stack monorepo",
+            "description": "Detected dual frontend and backend API workspaces; routing to ECS Fargate container to host both API and Web UI."
+          }
+        ],
+        "runtime": "nodejs20.x",
+        "entryPoint": "dist/server.js",
+        "hasDockerfile": true,
+        "isMonorepo": true,
+        "suggestedContainerPort": 4000,
+        "suggestedHealthCheckPath": "/api/health",
+        "suggestedLambdaHandler": "index.handler",
+        "targetOptions": [
+          {
+            "target": "S3_CLOUDFRONT",
+            "cloudProvider": "AWS",
+            "archetype": "STATIC_EDGE",
+            "title": "S3 + CloudFront (OAC)",
+            "subtitle": "Private S3 Origin + Global Edge CDN",
+            "fitScore": 35,
+            "recommended": false,
+            "reason": "Best suited for static HTML/JS/SPA bundles that do not require a persistent server process."
+          },
+          {
+            "target": "ECS_FARGATE",
+            "cloudProvider": "AWS",
+            "archetype": "CONTAINER_SERVICE",
+            "title": "ECS Fargate + ALB",
+            "subtitle": "Serverless Containers + Application Load Balancer",
+            "fitScore": 95,
+            "recommended": true,
+            "reason": "Optimal for Full-Stack Monorepo (API + Web): supports long-running HTTP servers, WebSockets, and custom Dockerfiles behind an ALB."
+          },
+          {
+            "target": "LAMBDA_API_GATEWAY",
+            "cloudProvider": "AWS",
+            "archetype": "SERVERLESS_FUNC",
+            "title": "Lambda + API Gateway",
+            "subtitle": "Event-Driven Serverless Functions + HTTP API v2",
+            "fitScore": 30,
+            "recommended": false,
+            "reason": "Ideal for stateless APIs and request handlers with serverless adapters (`serverless-http` / Mangum)."
+          },
+          {
+            "target": "AMPLIFY",
+            "cloudProvider": "AWS",
+            "archetype": "SSR_WEB",
+            "title": "AWS Amplify Hosting",
+            "subtitle": "Managed Full-Stack CI/CD & Next.js SSR Compute",
+            "fitScore": 40,
+            "recommended": false,
+            "reason": "Managed hosting alternative for Next.js SSR and Git-connected frontend apps."
+          },
+          {
+            "target": "FULLSTACK_SERVERLESS",
+            "cloudProvider": "AWS",
+            "archetype": "STATIC_EDGE",
+            "title": "S3 + CloudFront + Lambda",
+            "subtitle": "Zero-Cost Full-Stack Serverless (Web + Express API)",
+            "fitScore": 96,
+            "recommended": false,
+            "reason": "100% Free Tier ($0/mo): Routes /* to static S3 via CloudFront OAC, and /api/* to Express API on AWS Lambda."
+          }
+        ],
+        "aiExplanation": "Detected **Full-Stack Monorepo (API + Web)** (containerized-service) with 96% confidence. The repository builds via `npm run build` and outputs artifacts to `dist/`. Recommended target: **Amazon ECS Fargate container service behind an Application Load Balancer**."
+      },
+      "isProductionActive": false
+    },
+    "dep_d8c02318": {
+      "deploymentId": "dep_d8c02318",
+      "environment": "production",
+      "cloudProvider": "AWS",
+      "archetype": "STATIC_EDGE",
+      "tenancy": "DEPLOYMATE_MANAGED",
+      "repoUrl": "https://github.com/nmahendran-aws/deploy-mate",
+      "repoOwner": "nmahendran-aws",
+      "repoName": "deploy-mate",
+      "branch": "main",
+      "deploymentType": "static",
+      "target": "FULLSTACK_SERVERLESS",
+      "status": "DELETED",
+      "queuePosition": null,
+      "subdomain": "mahens",
+      "domain": "maas-fam.com",
+      "customHostname": "mahens.maas-fam.com",
+      "url": null,
+      "infrastructureUrl": null,
+      "targetConfig": {
+        "envVarKeys": []
+      },
+      "checklist": {
+        "repositoryAnalyzed": true,
+        "buildCompleted": true,
+        "cloudResourcesConfigured": true,
+        "httpsAndDomainVerified": false
+      },
+      "resources": {
+        "provider": "AWS",
+        "acmCertificateArn": "arn:aws:acm:us-east-1:471727841202:certificate/17bd4b50-23bd-4585-8469-ce10f7bdb254",
+        "s3BucketName": "repo2cloud-static-depd8c02318",
+        "s3KeyPrefix": "",
+        "lambdaRoleArn": "arn:aws:iam::471727841202:role/repo2cloud-lambda-exec-role",
+        "lambdaFunctionName": "r2c-deploy-mate-api-depd8c02318",
+        "apiGatewayId": "6s3773xgvi",
+        "apiGatewayEndpoint": "https://6s3773xgvi.execute-api.us-east-1.amazonaws.com",
+        "cloudFrontOacId": "E3BNB7XDFQ26K3",
+        "cloudFrontDistributionId": "E23PS0WKN1OB7Y",
+        "cloudFrontDomainName": "d15vigp4risxl9.cloudfront.net",
+        "route53HostedZoneId": "Z08163272O28TLSJ7THDI",
+        "route53RecordName": "mahens.maas-fam.com",
+        "route53TargetDnsName": "d15vigp4risxl9.cloudfront.net",
+        "route53TargetHostedZoneId": "Z2FDTNDATAQYW2"
+      },
+      "auditLogs": [
+        {
+          "timestamp": "2026-10-31T15:34:09.294Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Deployment dep_d8c02318 started for https://github.com/nmahendran-aws/deploy-mate [provider=AWS, target=FULLSTACK_SERVERLESS] with reserved hostname https://mahens.maas-fam.com."
+        },
+        {
+          "timestamp": "2026-10-31T15:34:09.312Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Inspecting repository https://github.com/nmahendran-aws/deploy-mate and preparing isolated build workspace..."
+        },
+        {
+          "timestamp": "2026-10-31T15:34:09.319Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Fetching repository source from GitHub into isolated workspace..."
+        },
+        {
+          "timestamp": "2026-10-31T15:34:13.108Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Repository archive downloaded, extracted, .git/config scrubbed, and verified against symlink escape."
+        },
+        {
+          "timestamp": "2026-10-31T15:34:13.121Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Detected Full-Stack Monorepo (API + Web) (buildCommand=\"npm run build\", outputDirectory=\"dist\")."
+        },
+        {
+          "timestamp": "2026-10-31T15:34:13.187Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Isolated build worker initialized (timeout=180s, awsCredentialsExposed=false, dockerIsolation=false)."
+        },
+        {
+          "timestamp": "2026-10-31T15:34:13.194Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Executing build command: npm run build"
+        },
+        {
+          "timestamp": "2026-10-31T15:34:15.210Z",
+          "phase": "BUILDING",
+          "level": "WARN",
+          "message": "[Phase 8 Self-Healing] Detected BUILDING_ERROR: Retried isolated build with fallback static packaging. (Attempt #2)"
+        },
+        {
+          "timestamp": "2026-10-31T15:34:15.217Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Isolated build worker initialized (timeout=180s, awsCredentialsExposed=false, dockerIsolation=false)."
+        },
+        {
+          "timestamp": "2026-10-31T15:34:15.226Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Verified production Dockerfile at Dockerfile (non-root container runtime)."
+        },
+        {
+          "timestamp": "2026-10-31T15:34:15.248Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Verified 80 build artifact(s) ready for deployment."
+        },
+        {
+          "timestamp": "2026-10-31T15:34:15.268Z",
+          "phase": "BUILDING",
+          "level": "SUCCESS",
+          "message": "Isolated build completed in 43ms."
+        },
+        {
+          "timestamp": "2026-10-31T15:34:15.339Z",
+          "phase": "CONFIGURING_DOMAIN",
+          "level": "INFO",
+          "message": "Phase 2 Task 4: Ensuring ACM TLS certificate for mahens.maas-fam.com..."
+        },
+        {
+          "timestamp": "2026-10-31T15:34:15.346Z",
+          "phase": "CONFIGURING_DOMAIN",
+          "level": "INFO",
+          "message": "Task 4: Using configured wildcard ACM certificate in us-east-1 (arn:aws:acm:us-east-1:471727841202:certificate/17bd4b50-23bd-4585-8469-ce10f7bdb254) for mahens.maas-fam.com."
+        },
+        {
+          "timestamp": "2026-10-31T15:34:15.364Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Uploading static assets to private S3 bucket and creating CloudFront OAC distribution..."
+        },
+        {
+          "timestamp": "2026-10-31T15:34:15.393Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Creating private S3 bucket \"repo2cloud-static-depd8c02318\" in us-east-1..."
+        },
+        {
+          "timestamp": "2026-10-31T15:34:16.250Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Uploading 80 static frontend asset(s) to private S3 bucket s3://repo2cloud-static-depd8c02318/..."
+        },
+        {
+          "timestamp": "2026-10-31T15:34:23.436Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Uploaded static frontend assets to private S3 bucket."
+        },
+        {
+          "timestamp": "2026-10-31T15:34:23.444Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 10: Bundling serverless Express API handler with esbuild..."
+        },
+        {
+          "timestamp": "2026-10-31T15:34:26.363Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Notice: esbuild bundling fell back: Command failed: npx esbuild \"/var/folders/7s/8hs28_w978l3whkx5sl96l080000gp/T/repo2cloud-isolated-builds/dep_d8c02318/repo/backend/src/lambda.ts\" --bundle --platform=node --target=node20 --outfile=\"/var/folders/7s/8hs28_w978l3whkx5sl96l080000gp/T/repo2cloud-isolated-builds/dep_d8c02318/repo/index.js\" --external:@aws-sdk\n✘ [ERROR] Could not resolve \"serverless-http\"\n\n    ../../../../../private/var/folders/7s/8hs28_w978l3whkx5sl96l080000gp/T/repo2cloud-isolated-builds/dep_d8c02318/repo/backend/src/lambda.ts:1:23:\n      1 │ import serverless from 'serverless-http';\n        ╵                        ~~~~~~~~~~~~~~~~~\n\n  You can mark the path \"serverless-http\" as external to exclude it from the bundle, which will remove this error and leave the unresolved path in the bundle.\n\n✘ [ERROR] Could not resolve \"cors\"\n\n    ../../../../../private/var/folders/7s/8hs28_w978l3whkx5sl96l080000gp/T/repo2cloud-isolated-builds/dep_d8c02318/repo/backend/src/server.ts:1:17:\n      1 │ import cors from 'cors';\n        ╵                  ~~~~~~\n\n  You can mark the path \"cors\" as external to exclude it from the bundle, which will remove this error and leave the unresolved path in the bundle.\n\n✘ [ERROR] Could not resolve \"dotenv\"\n\n    ../../../../../private/var/folders/7s/8hs28_w978l3whkx5sl96l080000gp/T/repo2cloud-isolated-builds/dep_d8c02318/repo/backend/src/server.ts:2:19:\n      2 │ import dotenv from 'dotenv';\n        ╵                    ~~~~~~~~\n\n  You can mark the path \"dotenv\" as external to exclude it from the bundle, which will remove this error and leave the unresolved path in the bundle.\n\n✘ [ERROR] Could not resolve \"express\"\n\n    ../../../../../private/var/folders/7s/8hs28_w978l3whkx5sl96l080000gp/T/repo2cloud-isolated-builds/dep_d8c02318/repo/backend/src/server.ts:3:66:\n      3 │ ...press, { Express, NextFunction, Request, Response } from 'express';\n        ╵                                                             ~~~~~~~~~\n\n  You can mark the path \"express\" as external to exclude it from the bundle, which will remove this error and leave the unresolved path in the bundle.\n\n✘ [ERROR] Could not resolve \"dotenv\"\n\n    ../../../../../private/var/folders/7s/8hs28_w978l3whkx5sl96l080000gp/T/repo2cloud-isolated-builds/dep_d8c02318/repo/backend/src/utils/validation.ts:1:19:\n      1 │ import dotenv from 'dotenv';\n        ╵                    ~~~~~~~~\n\n  You can mark the path \"dotenv\" as external to exclude it from the bundle, which will remove this error and leave the unresolved path in the bundle.\n\n✘ [ERROR] Could not resolve \"express\"\n\n    ../../../../../private/var/folders/7s/8hs28_w978l3whkx5sl96l080000gp/T/repo2cloud-isolated-builds/dep_d8c02318/repo/backend/src/routes/deployRoutes.ts:1:42:\n      1 │ import { Request, Response, Router } from 'express';\n        ╵                                           ~~~~~~~~~\n\n  You can mark the path \"express\" as external to exclude it from the bundle, which will remove this error and leave the unresolved path in the bundle.\n\n6 of 10 errors shown (disable the message limit with --log-limit=0)\n"
+        },
+        {
+          "timestamp": "2026-10-31T15:34:27.623Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 5 Task 1: Packaged serverless bundle (81 file(s), 5895.1 KB ZIP) with handler \"index.handler\" (nodejs20.x)."
+        },
+        {
+          "timestamp": "2026-10-31T15:34:28.497Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 5 Task 2: Verified existing IAM Execution Role (arn:aws:iam::471727841202:role/repo2cloud-lambda-exec-role)."
+        },
+        {
+          "timestamp": "2026-10-31T15:34:36.814Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 5 Task 3: Provisioned AWS Lambda Function \"r2c-deploy-mate-depd8c02318\" (arn:aws:lambda:us-east-1:471727841202:function:r2c-deploy-mate-depd8c02318)."
+        },
+        {
+          "timestamp": "2026-10-31T15:34:42.156Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 5 Task 3: Verified AWS Lambda Function \"r2c-deploy-mate-depd8c02318\" is ACTIVE."
+        },
+        {
+          "timestamp": "2026-10-31T15:34:43.380Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 5 Task 4: Created API Gateway v2 HTTP API \"6s3773xgvi\" -> https://6s3773xgvi.execute-api.us-east-1.amazonaws.com and granted invoke permission."
+        },
+        {
+          "timestamp": "2026-10-31T15:34:43.399Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Creating CloudFront Origin Access Control (oac-depd8c02318-1793460883399)..."
+        },
+        {
+          "timestamp": "2026-10-31T15:34:43.887Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Creating multi-origin CloudFront distribution (/* -> S3, /api/* -> 6s3773xgvi.execute-api.us-east-1.amazonaws.com)..."
+        },
+        {
+          "timestamp": "2026-10-31T15:34:45.390Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Successfully provisioned Zero-Cost Full-Stack Serverless distribution (E23PS0WKN1OB7Y) at https://d15vigp4risxl9.cloudfront.net."
+        },
+        {
+          "timestamp": "2026-10-31T15:34:45.469Z",
+          "phase": "CONFIGURING_DOMAIN",
+          "level": "INFO",
+          "message": "Phase 2 Task 6: Creating Route 53 Alias record for mahens.maas-fam.com -> d15vigp4risxl9.cloudfront.net..."
+        },
+        {
+          "timestamp": "2026-10-31T15:34:45.479Z",
+          "phase": "CONFIGURING_DOMAIN",
+          "level": "INFO",
+          "message": "Task 6: Creating Route 53 Alias record mahens.maas-fam.com -> d15vigp4risxl9.cloudfront.net. in Hosted Zone Z08163272O28TLSJ7THDI..."
+        },
+        {
+          "timestamp": "2026-10-31T15:34:45.747Z",
+          "phase": "CONFIGURING_DOMAIN",
+          "level": "INFO",
+          "message": "Task 7: Polling Route 53 change C08079633HMGTR4P9JZ2E until status is INSYNC..."
+        },
+        {
+          "timestamp": "2026-10-31T15:35:14.548Z",
+          "phase": "CONFIGURING_DOMAIN",
+          "level": "INFO",
+          "message": "Task 7: Route 53 Alias record for mahens.maas-fam.com is INSYNC."
+        },
+        {
+          "timestamp": "2026-10-31T15:35:14.618Z",
+          "phase": "VERIFYING",
+          "level": "INFO",
+          "message": "Phase 2 Task 8: Verifying HTTPS & TLS readiness for https://mahens.maas-fam.com..."
+        },
+        {
+          "timestamp": "2026-10-31T15:35:14.624Z",
+          "phase": "VERIFYING",
+          "level": "INFO",
+          "message": "Task 8: Verifying live HTTPS reachability at https://mahens.maas-fam.com..."
+        },
+        {
+          "timestamp": "2026-10-31T15:35:50.991Z",
+          "phase": "VERIFYING",
+          "level": "ERROR",
+          "message": "Endpoint https://mahens.maas-fam.com did not respond over HTTPS within verification window."
+        },
+        {
+          "timestamp": "2026-10-31T15:44:55.416Z",
+          "phase": "FAILED",
+          "level": "INFO",
+          "message": "Initiating AWS infrastructure & DNS cleanup for dep_d8c02318..."
+        },
+        {
+          "timestamp": "2026-10-31T15:44:57.167Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Disabled CloudFront distribution E23PS0WKN1OB7Y; waiting for Deployed state..."
+        },
+        {
+          "timestamp": "2026-10-31T15:45:52.510Z",
+          "phase": "FAILED",
+          "level": "INFO",
+          "message": "Initiating AWS infrastructure & DNS cleanup for dep_d8c02318..."
+        },
+        {
+          "timestamp": "2026-10-31T15:45:53.003Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "CloudFront cleanup note: The distribution you are trying to delete has not been disabled."
+        },
+        {
+          "timestamp": "2026-10-31T15:45:53.355Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "OAC cleanup note: The CloudFront origin access control is still being used."
+        },
+        {
+          "timestamp": "2026-10-31T15:45:55.147Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Deleted private S3 bucket repo2cloud-static-depd8c02318."
+        },
+        {
+          "timestamp": "2026-10-31T15:45:56.017Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Deleted Amazon API Gateway v2 HTTP API \"6s3773xgvi\"."
+        },
+        {
+          "timestamp": "2026-10-31T15:45:56.289Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Lambda cleanup note: AWS lambda DELETE /2015-03-31/functions/r2c-deploy-mate-api-depd8c02318 failed (404): {\"Message\":\"Function not found: arn:aws:lambda:us-east-1:471727841202:function:r2c-deploy-mate-api-depd8c02318\",\"Type\":\"User\"}"
+        },
+        {
+          "timestamp": "2026-10-31T15:45:56.795Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Deleted Route 53 ALIAS A/AAAA records for mahens.maas-fam.com."
+        },
+        {
+          "timestamp": "2026-10-31T15:45:56.809Z",
+          "phase": "DELETED",
+          "level": "SUCCESS",
+          "message": "All cloud resources deleted and hostname mahens.maas-fam.com released."
+        },
+        {
+          "timestamp": "2026-10-31T15:47:03.248Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "CloudFront cleanup note: The distribution you are trying to delete has not been disabled."
+        },
+        {
+          "timestamp": "2026-10-31T15:47:03.954Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "OAC cleanup note: The CloudFront origin access control is still being used."
+        },
+        {
+          "timestamp": "2026-10-31T15:47:04.190Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "S3 cleanup note: The specified bucket does not exist"
+        },
+        {
+          "timestamp": "2026-10-31T15:47:04.511Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "API Gateway cleanup note: AWS apigateway DELETE /v2/apis/6s3773xgvi failed (404): {\"message\":\"Invalid API identifier specified 471727841202:6s3773xgvi\"}"
+        },
+        {
+          "timestamp": "2026-10-31T15:47:04.981Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Lambda cleanup note: AWS lambda DELETE /2015-03-31/functions/r2c-deploy-mate-api-depd8c02318 failed (404): {\"Message\":\"Function not found: arn:aws:lambda:us-east-1:471727841202:function:r2c-deploy-mate-api-depd8c02318\",\"Type\":\"User\"}"
+        },
+        {
+          "timestamp": "2026-10-31T15:47:05.414Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Deleted Route 53 ALIAS A/AAAA records for mahens.maas-fam.com."
+        },
+        {
+          "timestamp": "2026-10-31T15:47:05.431Z",
+          "phase": "DELETED",
+          "level": "SUCCESS",
+          "message": "All cloud resources deleted and hostname mahens.maas-fam.com released."
+        }
+      ],
+      "error": {
+        "code": "EDGE_TLS_PROPAGATION_DELAY",
+        "message": "Endpoint https://mahens.maas-fam.com did not respond over HTTPS within verification window.",
+        "phase": "VERIFYING",
+        "remediation": "Ensure index.html exists in the published directory and ACM certificate is in us-east-1."
+      },
+      "dryRun": false,
+      "retryCount": 1,
+      "triggerSource": "manual",
+      "githubInstallationId": "inst_live_6fae8aea",
+      "createdAt": "2026-10-31T15:34:09.294Z",
+      "updatedAt": "2026-10-31T15:47:05.431Z",
+      "completedAt": null,
+      "analysis": {
+        "framework": "Full-Stack Monorepo (API + Web)",
+        "applicationType": "containerized-service",
+        "buildCommand": "npm run build",
+        "outputDirectory": "dist",
+        "recommendedTarget": "ECS_FARGATE",
+        "recommendedArchetype": "CONTAINER_SERVICE",
+        "confidence": 0.96,
+        "warnings": [
+          "Full-stack monorepo detected: containerizing application to deploy both backend API and frontend Web UI."
+        ],
+        "reasons": [
+          "Detected full-stack monorepo with an active backend API workspace. Recommending ECS Fargate container deployment so both backend API and frontend web UI run together."
+        ],
+        "signalsDetected": [
+          {
+            "signal": "Monorepo manifest",
+            "description": "Detected full-stack workspace with dedicated backend service"
+          },
+          {
+            "signal": "Dockerfile",
+            "description": "Container build definition found at repository root",
+            "file": "Dockerfile"
+          },
+          {
+            "signal": "Serverless configuration / handler",
+            "description": "Found AWS Lambda handler adapter in dependencies/files"
+          },
+          {
+            "signal": "Node.js server signal",
+            "description": "Detected Node.js server framework (Express/Fastify/NestJS)"
+          },
+          {
+            "signal": "package.json",
+            "description": "Inspected scripts (dev, dev:backend, dev:frontend, build, test, start) and 12 dependencies",
+            "file": "package.json"
+          },
+          {
+            "signal": "Full-stack monorepo",
+            "description": "Detected dual frontend and backend API workspaces; routing to ECS Fargate container to host both API and Web UI."
+          }
+        ],
+        "runtime": "nodejs20.x",
+        "entryPoint": "dist/server.js",
+        "hasDockerfile": true,
+        "isMonorepo": true,
+        "suggestedContainerPort": 4000,
+        "suggestedHealthCheckPath": "/api/health",
+        "suggestedLambdaHandler": "index.handler",
+        "targetOptions": [
+          {
+            "target": "S3_CLOUDFRONT",
+            "cloudProvider": "AWS",
+            "archetype": "STATIC_EDGE",
+            "title": "S3 + CloudFront (OAC)",
+            "subtitle": "Private S3 Origin + Global Edge CDN",
+            "fitScore": 35,
+            "recommended": false,
+            "reason": "Best suited for static HTML/JS/SPA bundles that do not require a persistent server process."
+          },
+          {
+            "target": "ECS_FARGATE",
+            "cloudProvider": "AWS",
+            "archetype": "CONTAINER_SERVICE",
+            "title": "ECS Fargate + ALB",
+            "subtitle": "Serverless Containers + Application Load Balancer",
+            "fitScore": 95,
+            "recommended": true,
+            "reason": "Optimal for Full-Stack Monorepo (API + Web): supports long-running HTTP servers, WebSockets, and custom Dockerfiles behind an ALB."
+          },
+          {
+            "target": "LAMBDA_API_GATEWAY",
+            "cloudProvider": "AWS",
+            "archetype": "SERVERLESS_FUNC",
+            "title": "Lambda + API Gateway",
+            "subtitle": "Event-Driven Serverless Functions + HTTP API v2",
+            "fitScore": 30,
+            "recommended": false,
+            "reason": "Ideal for stateless APIs and request handlers with serverless adapters (`serverless-http` / Mangum)."
+          },
+          {
+            "target": "AMPLIFY",
+            "cloudProvider": "AWS",
+            "archetype": "SSR_WEB",
+            "title": "AWS Amplify Hosting",
+            "subtitle": "Managed Full-Stack CI/CD & Next.js SSR Compute",
+            "fitScore": 40,
+            "recommended": false,
+            "reason": "Managed hosting alternative for Next.js SSR and Git-connected frontend apps."
+          },
+          {
+            "target": "FULLSTACK_SERVERLESS",
+            "cloudProvider": "AWS",
+            "archetype": "STATIC_EDGE",
+            "title": "S3 + CloudFront + Lambda",
+            "subtitle": "Zero-Cost Full-Stack Serverless (Web + Express API)",
+            "fitScore": 96,
+            "recommended": false,
+            "reason": "100% Free Tier ($0/mo): Routes /* to static S3 via CloudFront OAC, and /api/* to Express API on AWS Lambda."
+          }
+        ],
+        "aiExplanation": "Detected **Full-Stack Monorepo (API + Web)** (containerized-service) with 96% confidence. The repository builds via `npm run build` and outputs artifacts to `dist/`. Recommended target: **Amazon ECS Fargate container service behind an Application Load Balancer**."
+      },
+      "isProductionActive": false
+    },
+    "dep_9ae08caf": {
+      "deploymentId": "dep_9ae08caf",
+      "environment": "production",
+      "cloudProvider": "AWS",
+      "archetype": "STATIC_EDGE",
+      "tenancy": "DEPLOYMATE_MANAGED",
+      "repoUrl": "https://github.com/nmahendran-aws/deploy-mate",
+      "repoOwner": "nmahendran-aws",
+      "repoName": "deploy-mate",
+      "branch": "main",
+      "deploymentType": "static",
+      "target": "FULLSTACK_SERVERLESS",
+      "status": "DELETED",
+      "queuePosition": null,
+      "subdomain": "mahens",
+      "domain": "maas-fam.com",
+      "customHostname": "mahens.maas-fam.com",
+      "url": null,
+      "infrastructureUrl": null,
+      "targetConfig": {
+        "envVarKeys": []
+      },
+      "checklist": {
+        "repositoryAnalyzed": true,
+        "buildCompleted": true,
+        "cloudResourcesConfigured": false,
+        "httpsAndDomainVerified": false
+      },
+      "resources": {
+        "provider": "AWS",
+        "acmCertificateArn": "arn:aws:acm:us-east-1:471727841202:certificate/17bd4b50-23bd-4585-8469-ce10f7bdb254",
+        "s3BucketName": "repo2cloud-static-dep9ae08caf",
+        "s3KeyPrefix": "",
+        "lambdaRoleArn": "arn:aws:iam::471727841202:role/repo2cloud-lambda-exec-role",
+        "lambdaFunctionName": "r2c-deploy-mate-api-dep9ae08caf",
+        "apiGatewayId": "qm31ul3ax0",
+        "apiGatewayEndpoint": "https://qm31ul3ax0.execute-api.us-east-1.amazonaws.com",
+        "cloudFrontOacId": "E1ZALN75P3VADB"
+      },
+      "auditLogs": [
+        {
+          "timestamp": "2026-10-31T15:46:08.803Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Deployment dep_9ae08caf started for https://github.com/nmahendran-aws/deploy-mate [provider=AWS, target=FULLSTACK_SERVERLESS] with reserved hostname https://mahens.maas-fam.com."
+        },
+        {
+          "timestamp": "2026-10-31T15:46:08.826Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Inspecting repository https://github.com/nmahendran-aws/deploy-mate and preparing isolated build workspace..."
+        },
+        {
+          "timestamp": "2026-10-31T15:46:08.850Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Fetching repository source from GitHub into isolated workspace..."
+        },
+        {
+          "timestamp": "2026-10-31T15:46:10.881Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Repository archive downloaded, extracted, .git/config scrubbed, and verified against symlink escape."
+        },
+        {
+          "timestamp": "2026-10-31T15:46:10.900Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Detected Full-Stack Monorepo (API + Web) (buildCommand=\"npm run build\", outputDirectory=\"dist\")."
+        },
+        {
+          "timestamp": "2026-10-31T15:46:10.966Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Isolated build worker initialized (timeout=180s, awsCredentialsExposed=false, dockerIsolation=false)."
+        },
+        {
+          "timestamp": "2026-10-31T15:46:10.972Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Installing dependencies in isolated worker with \"--ignore-scripts\" protection..."
+        },
+        {
+          "timestamp": "2026-10-31T15:46:45.446Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Executing build command: npm run build"
+        },
+        {
+          "timestamp": "2026-10-31T15:48:12.741Z",
+          "phase": "BUILDING",
+          "level": "WARN",
+          "message": "[Phase 8 Self-Healing] Detected BUILDING_ERROR: Retried isolated build with fallback static packaging. (Attempt #2)"
+        },
+        {
+          "timestamp": "2026-10-31T15:48:12.753Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Isolated build worker initialized (timeout=180s, awsCredentialsExposed=false, dockerIsolation=false)."
+        },
+        {
+          "timestamp": "2026-10-31T15:48:12.781Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Verified production Dockerfile at Dockerfile (non-root container runtime)."
+        },
+        {
+          "timestamp": "2026-10-31T15:48:12.873Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Verified 169 build artifact(s) ready for deployment."
+        },
+        {
+          "timestamp": "2026-10-31T15:48:12.890Z",
+          "phase": "BUILDING",
+          "level": "SUCCESS",
+          "message": "Isolated build completed in 130ms."
+        },
+        {
+          "timestamp": "2026-10-31T15:48:12.955Z",
+          "phase": "CONFIGURING_DOMAIN",
+          "level": "INFO",
+          "message": "Phase 2 Task 4: Ensuring ACM TLS certificate for mahens.maas-fam.com..."
+        },
+        {
+          "timestamp": "2026-10-31T15:48:12.964Z",
+          "phase": "CONFIGURING_DOMAIN",
+          "level": "INFO",
+          "message": "Task 4: Using configured wildcard ACM certificate in us-east-1 (arn:aws:acm:us-east-1:471727841202:certificate/17bd4b50-23bd-4585-8469-ce10f7bdb254) for mahens.maas-fam.com."
+        },
+        {
+          "timestamp": "2026-10-31T15:48:12.999Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Uploading static assets to private S3 bucket and creating CloudFront OAC distribution..."
+        },
+        {
+          "timestamp": "2026-10-31T15:48:13.020Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Creating private S3 bucket \"repo2cloud-static-dep9ae08caf\" in us-east-1..."
+        },
+        {
+          "timestamp": "2026-10-31T15:48:13.809Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Uploading 31 static frontend asset(s) to private S3 bucket s3://repo2cloud-static-dep9ae08caf/..."
+        },
+        {
+          "timestamp": "2026-10-31T15:48:15.154Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Uploaded static frontend assets to private S3 bucket."
+        },
+        {
+          "timestamp": "2026-10-31T15:48:15.158Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 10: Bundling serverless Express API handler with esbuild..."
+        },
+        {
+          "timestamp": "2026-10-31T15:48:17.230Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 10: Bundled backend API into standalone index.js (1555.4 KB)."
+        },
+        {
+          "timestamp": "2026-10-31T15:48:17.537Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 5 Task 1: Packaged serverless bundle (100 file(s), 1170.8 KB ZIP) with handler \"index.handler\" (nodejs20.x)."
+        },
+        {
+          "timestamp": "2026-10-31T15:48:17.946Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 5 Task 2: Verified existing IAM Execution Role (arn:aws:iam::471727841202:role/repo2cloud-lambda-exec-role)."
+        },
+        {
+          "timestamp": "2026-10-31T15:48:19.958Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 5 Task 3: Provisioned AWS Lambda Function \"r2c-deploy-mate-dep9ae08caf\" (arn:aws:lambda:us-east-1:471727841202:function:r2c-deploy-mate-dep9ae08caf)."
+        },
+        {
+          "timestamp": "2026-10-31T15:48:25.618Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 5 Task 3: Verified AWS Lambda Function \"r2c-deploy-mate-dep9ae08caf\" is ACTIVE."
+        },
+        {
+          "timestamp": "2026-10-31T15:48:26.956Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 5 Task 4: Created API Gateway v2 HTTP API \"qm31ul3ax0\" -> https://qm31ul3ax0.execute-api.us-east-1.amazonaws.com and granted invoke permission."
+        },
+        {
+          "timestamp": "2026-10-31T15:48:26.967Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Creating CloudFront Origin Access Control (oac-dep9ae08caf-1793461706967)..."
+        },
+        {
+          "timestamp": "2026-10-31T15:48:27.213Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Creating multi-origin CloudFront distribution (/* -> S3, /api/* -> qm31ul3ax0.execute-api.us-east-1.amazonaws.com)..."
+        },
+        {
+          "timestamp": "2026-10-31T15:48:27.898Z",
+          "phase": "DEPLOYING",
+          "level": "ERROR",
+          "message": "One or more of the CNAMEs you provided are already associated with a different resource."
+        },
+        {
+          "timestamp": "2026-10-31T15:49:20.817Z",
+          "phase": "FAILED",
+          "level": "INFO",
+          "message": "Initiating AWS infrastructure & DNS cleanup for dep_9ae08caf..."
+        },
+        {
+          "timestamp": "2026-10-31T15:49:21.381Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Deleted CloudFront OAC E1ZALN75P3VADB."
+        },
+        {
+          "timestamp": "2026-10-31T15:49:22.652Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Deleted private S3 bucket repo2cloud-static-dep9ae08caf."
+        },
+        {
+          "timestamp": "2026-10-31T15:49:23.534Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Deleted Amazon API Gateway v2 HTTP API \"qm31ul3ax0\"."
+        },
+        {
+          "timestamp": "2026-10-31T15:49:23.812Z",
+          "phase": "DELETED",
+          "level": "INFO",
+          "message": "Lambda cleanup note: AWS lambda DELETE /2015-03-31/functions/r2c-deploy-mate-api-dep9ae08caf failed (404): {\"Message\":\"Function not found: arn:aws:lambda:us-east-1:471727841202:function:r2c-deploy-mate-api-dep9ae08caf\",\"Type\":\"User\"}"
+        },
+        {
+          "timestamp": "2026-10-31T15:49:23.819Z",
+          "phase": "DELETED",
+          "level": "SUCCESS",
+          "message": "All cloud resources deleted and hostname mahens.maas-fam.com released."
+        }
+      ],
+      "error": {
+        "code": "DEPLOYING_ERROR",
+        "message": "One or more of the CNAMEs you provided are already associated with a different resource.",
+        "phase": "DEPLOYING",
+        "remediation": "Check the pipeline audit log for the failing command or AWS permission."
+      },
+      "dryRun": false,
+      "retryCount": 1,
+      "triggerSource": "manual",
+      "githubInstallationId": "inst_live_6fae8aea",
+      "createdAt": "2026-10-31T15:46:08.803Z",
+      "updatedAt": "2026-10-31T15:49:23.819Z",
+      "completedAt": null,
+      "analysis": {
+        "framework": "Full-Stack Monorepo (API + Web)",
+        "applicationType": "containerized-service",
+        "buildCommand": "npm run build",
+        "outputDirectory": "dist",
+        "recommendedTarget": "ECS_FARGATE",
+        "recommendedArchetype": "CONTAINER_SERVICE",
+        "confidence": 0.96,
+        "warnings": [
+          "Full-stack monorepo detected: containerizing application to deploy both backend API and frontend Web UI."
+        ],
+        "reasons": [
+          "Detected full-stack monorepo with an active backend API workspace. Recommending ECS Fargate container deployment so both backend API and frontend web UI run together."
+        ],
+        "signalsDetected": [
+          {
+            "signal": "Monorepo manifest",
+            "description": "Detected full-stack workspace with dedicated backend service"
+          },
+          {
+            "signal": "Dockerfile",
+            "description": "Container build definition found at repository root",
+            "file": "Dockerfile"
+          },
+          {
+            "signal": "Serverless configuration / handler",
+            "description": "Found AWS Lambda handler adapter in dependencies/files"
+          },
+          {
+            "signal": "Node.js server signal",
+            "description": "Detected Node.js server framework (Express/Fastify/NestJS)"
+          },
+          {
+            "signal": "package.json",
+            "description": "Inspected scripts (dev, dev:backend, dev:frontend, build, test, start) and 12 dependencies",
+            "file": "package.json"
+          },
+          {
+            "signal": "Full-stack monorepo",
+            "description": "Detected dual frontend and backend API workspaces; routing to ECS Fargate container to host both API and Web UI."
+          }
+        ],
+        "runtime": "nodejs20.x",
+        "entryPoint": "dist/server.js",
+        "hasDockerfile": true,
+        "isMonorepo": true,
+        "suggestedContainerPort": 4000,
+        "suggestedHealthCheckPath": "/api/health",
+        "suggestedLambdaHandler": "index.handler",
+        "targetOptions": [
+          {
+            "target": "S3_CLOUDFRONT",
+            "cloudProvider": "AWS",
+            "archetype": "STATIC_EDGE",
+            "title": "S3 + CloudFront (OAC)",
+            "subtitle": "Private S3 Origin + Global Edge CDN",
+            "fitScore": 35,
+            "recommended": false,
+            "reason": "Best suited for static HTML/JS/SPA bundles that do not require a persistent server process."
+          },
+          {
+            "target": "ECS_FARGATE",
+            "cloudProvider": "AWS",
+            "archetype": "CONTAINER_SERVICE",
+            "title": "ECS Fargate + ALB",
+            "subtitle": "Serverless Containers + Application Load Balancer",
+            "fitScore": 95,
+            "recommended": true,
+            "reason": "Optimal for Full-Stack Monorepo (API + Web): supports long-running HTTP servers, WebSockets, and custom Dockerfiles behind an ALB."
+          },
+          {
+            "target": "LAMBDA_API_GATEWAY",
+            "cloudProvider": "AWS",
+            "archetype": "SERVERLESS_FUNC",
+            "title": "Lambda + API Gateway",
+            "subtitle": "Event-Driven Serverless Functions + HTTP API v2",
+            "fitScore": 30,
+            "recommended": false,
+            "reason": "Ideal for stateless APIs and request handlers with serverless adapters (`serverless-http` / Mangum)."
+          },
+          {
+            "target": "AMPLIFY",
+            "cloudProvider": "AWS",
+            "archetype": "SSR_WEB",
+            "title": "AWS Amplify Hosting",
+            "subtitle": "Managed Full-Stack CI/CD & Next.js SSR Compute",
+            "fitScore": 40,
+            "recommended": false,
+            "reason": "Managed hosting alternative for Next.js SSR and Git-connected frontend apps."
+          },
+          {
+            "target": "FULLSTACK_SERVERLESS",
+            "cloudProvider": "AWS",
+            "archetype": "STATIC_EDGE",
+            "title": "S3 + CloudFront + Lambda",
+            "subtitle": "Zero-Cost Full-Stack Serverless (Web + Express API)",
+            "fitScore": 96,
+            "recommended": false,
+            "reason": "100% Free Tier ($0/mo): Routes /* to static S3 via CloudFront OAC, and /api/* to Express API on AWS Lambda."
+          }
+        ],
+        "aiExplanation": "Detected **Full-Stack Monorepo (API + Web)** (containerized-service) with 96% confidence. The repository builds via `npm run build` and outputs artifacts to `dist/`. Recommended target: **Amazon ECS Fargate container service behind an Application Load Balancer**."
+      },
+      "isProductionActive": false
+    },
+    "dep_2b0aa15c": {
+      "deploymentId": "dep_2b0aa15c",
+      "environment": "production",
+      "cloudProvider": "AWS",
+      "archetype": "STATIC_EDGE",
+      "tenancy": "DEPLOYMATE_MANAGED",
+      "repoUrl": "https://github.com/nmahendran-aws/deploy-mate",
+      "repoOwner": "nmahendran-aws",
+      "repoName": "deploy-mate",
+      "branch": "main",
+      "deploymentType": "static",
+      "target": "FULLSTACK_SERVERLESS",
+      "status": "LIVE",
+      "queuePosition": null,
+      "subdomain": "mahens",
+      "domain": "maas-fam.com",
+      "customHostname": "mahens.maas-fam.com",
+      "url": "https://mahens.maas-fam.com",
+      "infrastructureUrl": null,
+      "targetConfig": {
+        "envVarKeys": []
+      },
+      "checklist": {
+        "repositoryAnalyzed": true,
+        "buildCompleted": true,
+        "cloudResourcesConfigured": false,
+        "httpsAndDomainVerified": false
+      },
+      "resources": {
+        "provider": "AWS",
+        "acmCertificateArn": "arn:aws:acm:us-east-1:471727841202:certificate/17bd4b50-23bd-4585-8469-ce10f7bdb254",
+        "s3BucketName": "repo2cloud-static-dep2b0aa15c",
+        "s3KeyPrefix": "",
+        "lambdaRoleArn": "arn:aws:iam::471727841202:role/repo2cloud-lambda-exec-role",
+        "lambdaFunctionName": "r2c-deploy-mate-api-dep2b0aa15c",
+        "apiGatewayId": "0d2isksgk4",
+        "apiGatewayEndpoint": "https://0d2isksgk4.execute-api.us-east-1.amazonaws.com",
+        "cloudFrontOacId": "E2L2DJP8HETL3T",
+        "cloudFrontDistributionId": "E1RL81GF14KE2U",
+        "cloudFrontDomainName": "d1a89rtwv8yx08.cloudfront.net"
+      },
+      "auditLogs": [
+        {
+          "timestamp": "2026-10-31T15:49:48.180Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Deployment dep_2b0aa15c started for https://github.com/nmahendran-aws/deploy-mate [provider=AWS, target=FULLSTACK_SERVERLESS] with reserved hostname https://mahens.maas-fam.com."
+        },
+        {
+          "timestamp": "2026-10-31T15:49:48.194Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Inspecting repository https://github.com/nmahendran-aws/deploy-mate and preparing isolated build workspace..."
+        },
+        {
+          "timestamp": "2026-10-31T15:49:48.202Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Fetching repository source from GitHub into isolated workspace..."
+        },
+        {
+          "timestamp": "2026-10-31T15:49:56.480Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Repository archive downloaded, extracted, .git/config scrubbed, and verified against symlink escape."
+        },
+        {
+          "timestamp": "2026-10-31T15:49:56.490Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Detected Full-Stack Monorepo (API + Web) (buildCommand=\"npm run build\", outputDirectory=\"dist\")."
+        },
+        {
+          "timestamp": "2026-10-31T15:49:56.552Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Isolated build worker initialized (timeout=180s, awsCredentialsExposed=false, dockerIsolation=false)."
+        },
+        {
+          "timestamp": "2026-10-31T15:49:56.555Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Installing dependencies in isolated worker with \"--ignore-scripts\" protection..."
+        },
+        {
+          "timestamp": "2026-10-31T15:50:12.351Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Executing build command: npm run build"
+        },
+        {
+          "timestamp": "2026-10-31T15:51:52.703Z",
+          "phase": "BUILDING",
+          "level": "WARN",
+          "message": "[Phase 8 Self-Healing] Detected BUILDING_ERROR: Retried isolated build with fallback static packaging. (Attempt #2)"
+        },
+        {
+          "timestamp": "2026-10-31T15:51:52.714Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Isolated build worker initialized (timeout=180s, awsCredentialsExposed=false, dockerIsolation=false)."
+        },
+        {
+          "timestamp": "2026-10-31T15:51:52.720Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Verified production Dockerfile at Dockerfile (non-root container runtime)."
+        },
+        {
+          "timestamp": "2026-10-31T15:51:52.757Z",
+          "phase": "BUILDING",
+          "level": "INFO",
+          "message": "Verified 169 build artifact(s) ready for deployment."
+        },
+        {
+          "timestamp": "2026-10-31T15:51:52.768Z",
+          "phase": "BUILDING",
+          "level": "SUCCESS",
+          "message": "Isolated build completed in 49ms."
+        },
+        {
+          "timestamp": "2026-10-31T15:51:52.830Z",
+          "phase": "CONFIGURING_DOMAIN",
+          "level": "INFO",
+          "message": "Phase 2 Task 4: Ensuring ACM TLS certificate for mahens.maas-fam.com..."
+        },
+        {
+          "timestamp": "2026-10-31T15:51:52.840Z",
+          "phase": "CONFIGURING_DOMAIN",
+          "level": "INFO",
+          "message": "Task 4: Using configured wildcard ACM certificate in us-east-1 (arn:aws:acm:us-east-1:471727841202:certificate/17bd4b50-23bd-4585-8469-ce10f7bdb254) for mahens.maas-fam.com."
+        },
+        {
+          "timestamp": "2026-10-31T15:51:52.855Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Uploading static assets to private S3 bucket and creating CloudFront OAC distribution..."
+        },
+        {
+          "timestamp": "2026-10-31T15:51:52.872Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Creating private S3 bucket \"repo2cloud-static-dep2b0aa15c\" in us-east-1..."
+        },
+        {
+          "timestamp": "2026-10-31T15:51:53.673Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Uploading 31 static frontend asset(s) to private S3 bucket s3://repo2cloud-static-dep2b0aa15c/..."
+        },
+        {
+          "timestamp": "2026-10-31T15:51:54.875Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Uploaded static frontend assets to private S3 bucket."
+        },
+        {
+          "timestamp": "2026-10-31T15:51:54.878Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 10: Bundling serverless Express API handler with esbuild..."
+        },
+        {
+          "timestamp": "2026-10-31T15:51:57.283Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 10: Bundled backend API into standalone index.js (1555.5 KB)."
+        },
+        {
+          "timestamp": "2026-10-31T15:51:57.567Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 5 Task 1: Packaged serverless bundle (100 file(s), 1170.9 KB ZIP) with handler \"index.handler\" (nodejs20.x)."
+        },
+        {
+          "timestamp": "2026-10-31T15:51:57.935Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 5 Task 2: Verified existing IAM Execution Role (arn:aws:iam::471727841202:role/repo2cloud-lambda-exec-role)."
+        },
+        {
+          "timestamp": "2026-10-31T15:51:59.981Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 5 Task 3: Provisioned AWS Lambda Function \"r2c-deploy-mate-dep2b0aa15c\" (arn:aws:lambda:us-east-1:471727841202:function:r2c-deploy-mate-dep2b0aa15c)."
+        },
+        {
+          "timestamp": "2026-10-31T15:52:05.224Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 5 Task 3: Verified AWS Lambda Function \"r2c-deploy-mate-dep2b0aa15c\" is ACTIVE."
+        },
+        {
+          "timestamp": "2026-10-31T15:52:06.121Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Phase 5 Task 4: Created API Gateway v2 HTTP API \"0d2isksgk4\" -> https://0d2isksgk4.execute-api.us-east-1.amazonaws.com and granted invoke permission."
+        },
+        {
+          "timestamp": "2026-10-31T15:52:06.148Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Creating CloudFront Origin Access Control (oac-dep2b0aa15c-1793461926148)..."
+        },
+        {
+          "timestamp": "2026-10-31T15:52:06.391Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Creating multi-origin CloudFront distribution (/* -> S3, /api/* -> 0d2isksgk4.execute-api.us-east-1.amazonaws.com)..."
+        },
+        {
+          "timestamp": "2026-10-31T15:52:07.676Z",
+          "phase": "DEPLOYING",
+          "level": "INFO",
+          "message": "Waiting for CloudFront distribution E1RL81GF14KE2U to propagate to edge locations..."
+        }
+      ],
+      "error": null,
+      "dryRun": false,
+      "retryCount": 1,
+      "triggerSource": "manual",
+      "githubInstallationId": "inst_live_6fae8aea",
+      "createdAt": "2026-10-31T15:49:48.180Z",
+      "updatedAt": "2026-10-31T15:52:07.676Z",
+      "completedAt": null,
+      "analysis": {
+        "framework": "Full-Stack Monorepo (API + Web)",
+        "applicationType": "containerized-service",
+        "buildCommand": "npm run build",
+        "outputDirectory": "dist",
+        "recommendedTarget": "ECS_FARGATE",
+        "recommendedArchetype": "CONTAINER_SERVICE",
+        "confidence": 0.96,
+        "warnings": [
+          "Full-stack monorepo detected: containerizing application to deploy both backend API and frontend Web UI."
+        ],
+        "reasons": [
+          "Detected full-stack monorepo with an active backend API workspace. Recommending ECS Fargate container deployment so both backend API and frontend web UI run together."
+        ],
+        "signalsDetected": [
+          {
+            "signal": "Monorepo manifest",
+            "description": "Detected full-stack workspace with dedicated backend service"
+          },
+          {
+            "signal": "Dockerfile",
+            "description": "Container build definition found at repository root",
+            "file": "Dockerfile"
+          },
+          {
+            "signal": "Serverless configuration / handler",
+            "description": "Found AWS Lambda handler adapter in dependencies/files"
+          },
+          {
+            "signal": "Node.js server signal",
+            "description": "Detected Node.js server framework (Express/Fastify/NestJS)"
+          },
+          {
+            "signal": "package.json",
+            "description": "Inspected scripts (dev, dev:backend, dev:frontend, build, test, start) and 12 dependencies",
+            "file": "package.json"
+          },
+          {
+            "signal": "Full-stack monorepo",
+            "description": "Detected dual frontend and backend API workspaces; routing to ECS Fargate container to host both API and Web UI."
+          }
+        ],
+        "runtime": "nodejs20.x",
+        "entryPoint": "dist/server.js",
+        "hasDockerfile": true,
+        "isMonorepo": true,
+        "suggestedContainerPort": 4000,
+        "suggestedHealthCheckPath": "/api/health",
+        "suggestedLambdaHandler": "index.handler",
+        "targetOptions": [
+          {
+            "target": "S3_CLOUDFRONT",
+            "cloudProvider": "AWS",
+            "archetype": "STATIC_EDGE",
+            "title": "S3 + CloudFront (OAC)",
+            "subtitle": "Private S3 Origin + Global Edge CDN",
+            "fitScore": 35,
+            "recommended": false,
+            "reason": "Best suited for static HTML/JS/SPA bundles that do not require a persistent server process."
+          },
+          {
+            "target": "ECS_FARGATE",
+            "cloudProvider": "AWS",
+            "archetype": "CONTAINER_SERVICE",
+            "title": "ECS Fargate + ALB",
+            "subtitle": "Serverless Containers + Application Load Balancer",
+            "fitScore": 95,
+            "recommended": true,
+            "reason": "Optimal for Full-Stack Monorepo (API + Web): supports long-running HTTP servers, WebSockets, and custom Dockerfiles behind an ALB."
+          },
+          {
+            "target": "LAMBDA_API_GATEWAY",
+            "cloudProvider": "AWS",
+            "archetype": "SERVERLESS_FUNC",
+            "title": "Lambda + API Gateway",
+            "subtitle": "Event-Driven Serverless Functions + HTTP API v2",
+            "fitScore": 30,
+            "recommended": false,
+            "reason": "Ideal for stateless APIs and request handlers with serverless adapters (`serverless-http` / Mangum)."
+          },
+          {
+            "target": "AMPLIFY",
+            "cloudProvider": "AWS",
+            "archetype": "SSR_WEB",
+            "title": "AWS Amplify Hosting",
+            "subtitle": "Managed Full-Stack CI/CD & Next.js SSR Compute",
+            "fitScore": 40,
+            "recommended": false,
+            "reason": "Managed hosting alternative for Next.js SSR and Git-connected frontend apps."
+          },
+          {
+            "target": "FULLSTACK_SERVERLESS",
+            "cloudProvider": "AWS",
+            "archetype": "STATIC_EDGE",
+            "title": "S3 + CloudFront + Lambda",
+            "subtitle": "Zero-Cost Full-Stack Serverless (Web + Express API)",
+            "fitScore": 96,
+            "recommended": false,
+            "reason": "100% Free Tier ($0/mo): Routes /* to static S3 via CloudFront OAC, and /api/* to Express API on AWS Lambda."
+          }
+        ],
+        "aiExplanation": "Detected **Full-Stack Monorepo (API + Web)** (containerized-service) with 96% confidence. The repository builds via `npm run build` and outputs artifacts to `dist/`. Recommended target: **Amazon ECS Fargate container service behind an Application Load Balancer**."
+      }
     }
   },
   "reservedHostnames": {
-    "mahen12.maas-fam.com": "dep_8a89ac3f",
-    "mahens.maas-fam.com": "dep_857a2cad"
+    "mahens.maas-fam.com": "dep_2b0aa15c"
   },
   "users": {
     "usr_d1550a4708": {

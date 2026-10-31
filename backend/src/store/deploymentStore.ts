@@ -3,6 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
+import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import {
   AuditLogEntry,
   DeploymentChecklist,
@@ -90,6 +91,9 @@ export class DeploymentStore implements IDeploymentRepository {
   private db: PersistedDatabase;
   private dynamoClient?: DynamoDBClient;
   private dynamoTableName?: string;
+  private s3Client?: S3Client;
+  private s3StateBucket?: string;
+  private readonly s3StateKey = 'state/deployments.json';
   private pgPool?: MinimalPgPool;
   /** In-memory secret values registered per deployment for automatic audit log scrubbing (DM-913) */
   private readonly secretRedactions: Map<string, string[]> = new Map();
@@ -127,6 +131,67 @@ export class DeploymentStore implements IDeploymentRepository {
     if (process.env.DATABASE_URL && process.env.FORCE_DRY_RUN_TEST !== 'true') {
       void this.initializePostgresPool(process.env.DATABASE_URL);
     }
+
+    if (this.isDefaultStore && process.env.DEPLOYMATE_STATE_BUCKET && process.env.FORCE_DRY_RUN_TEST !== 'true') {
+      this.s3StateBucket = process.env.DEPLOYMATE_STATE_BUCKET;
+      this.s3Client = new S3Client({
+        region: process.env.AWS_REGION || 'us-east-1',
+      });
+      void this.loadFromS3();
+    }
+  }
+
+  /**
+   * DM-902: Cloud-native shared state synchronization via private S3 state bucket.
+   * Ensures multi-container Lambda instances and cold-starts stay synchronized with zero data loss.
+   */
+  private async loadFromS3(): Promise<void> {
+    if (!this.s3Client || !this.s3StateBucket) return;
+    try {
+      const res = await this.s3Client.send(
+        new GetObjectCommand({
+          Bucket: this.s3StateBucket,
+          Key: this.s3StateKey,
+        })
+      );
+      if (res.Body) {
+        const raw = await res.Body.transformToString();
+        const parsed = JSON.parse(raw) as Partial<PersistedDatabase>;
+        if (parsed.deployments && Object.keys(parsed.deployments).length > 0) {
+          this.db = {
+            deployments: { ...parsed.deployments, ...this.db.deployments },
+            reservedHostnames: { ...parsed.reservedHostnames, ...this.db.reservedHostnames },
+            users: { ...parsed.users, ...this.db.users },
+            organizations: { ...parsed.organizations, ...this.db.organizations },
+            memberships: { ...parsed.memberships, ...this.db.memberships },
+            projects: { ...parsed.projects, ...this.db.projects },
+            encryptedSecrets: { ...parsed.encryptedSecrets, ...this.db.encryptedSecrets },
+            githubInstallations: { ...parsed.githubInstallations, ...this.db.githubInstallations },
+            prPreviewComments: { ...parsed.prPreviewComments, ...this.db.prPreviewComments },
+            processedWebhookDeliveries: { ...parsed.processedWebhookDeliveries, ...this.db.processedWebhookDeliveries },
+          };
+          this.saveToDisk(false);
+        }
+      }
+    } catch {
+      // Fallback silently if S3 state file is not yet created
+    }
+  }
+
+  private async syncToS3(): Promise<void> {
+    if (!this.s3Client || !this.s3StateBucket) return;
+    try {
+      await this.s3Client.send(
+        new PutObjectCommand({
+          Bucket: this.s3StateBucket,
+          Key: this.s3StateKey,
+          Body: JSON.stringify(this.db, null, 2),
+          ContentType: 'application/json',
+        })
+      );
+    } catch {
+      // Ignore if S3 sync fails
+    }
   }
 
   /**
@@ -156,8 +221,11 @@ export class DeploymentStore implements IDeploymentRepository {
       if (!fs.existsSync(targetFile) && this.isDefaultStore) {
         const seedPath = path.resolve(__dirname, 'seedDeployments.json');
         const altSeedPath = path.resolve(__dirname, '../../data/deployments.json');
+        const lambdaSeed = path.resolve('/var/task/seedDeployments.json');
         if (fs.existsSync(seedPath)) {
           targetFile = seedPath;
+        } else if (fs.existsSync(lambdaSeed)) {
+          targetFile = lambdaSeed;
         } else if (fs.existsSync(altSeedPath)) {
           targetFile = altSeedPath;
         }
@@ -196,7 +264,7 @@ export class DeploymentStore implements IDeploymentRepository {
     };
   }
 
-  private saveToDisk(): void {
+  private saveToDisk(syncS3 = true): void {
     const dir = path.dirname(this.filePath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
@@ -204,6 +272,9 @@ export class DeploymentStore implements IDeploymentRepository {
     const tmpFile = `${this.filePath}.${process.pid}.${Date.now()}.tmp`;
     fs.writeFileSync(tmpFile, JSON.stringify(this.db, null, 2), 'utf-8');
     fs.renameSync(tmpFile, this.filePath);
+    if (syncS3 && this.s3StateBucket) {
+      void this.syncToS3();
+    }
   }
 
   private async syncToPostgres(record: DeploymentRecord): Promise<void> {

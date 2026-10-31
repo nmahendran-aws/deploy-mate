@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 import path from 'path';
+import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import {
   inferArchetypeFromTarget,
   inferProviderFromTarget,
@@ -65,7 +66,10 @@ export class DeploymentManager {
     }
     dotenv.config({ path: path.resolve(__dirname, '../../../.env'), override: true });
     dotenv.config({ override: true });
-    if (process.env.AWS_DRY_RUN === 'false' && process.env.AWS_ACCESS_KEY_ID) {
+    if (process.env.AWS_DRY_RUN === 'false') {
+      return false;
+    }
+    if (process.env.AWS_ACCESS_KEY_ID) {
       return false;
     }
     return true;
@@ -444,9 +448,48 @@ export class DeploymentManager {
         );
       },
     });
+
+    // In AWS Lambda, fire-and-forget asynchronous self-invocation so background build
+    // execution has dedicated 300s runtime without being frozen by API Gateway HTTP return.
+    if (process.env.AWS_LAMBDA_FUNCTION_NAME) {
+      try {
+        const lambda = new LambdaClient({ region: process.env.AWS_REGION || 'us-east-1' });
+        lambda
+          .send(
+            new InvokeCommand({
+              FunctionName: process.env.AWS_LAMBDA_FUNCTION_NAME,
+              InvocationType: 'Event',
+              Payload: Buffer.from(
+                JSON.stringify({
+                  action: 'PROCESS_DEPLOYMENT',
+                  payload: {
+                    deploymentId,
+                    cloneUrl,
+                    domainConfig,
+                    userEnvVars,
+                    ephemeralGitHubToken,
+                  },
+                })
+              ),
+            })
+          )
+          .catch((err: unknown) => {
+            this.store.addLog(
+              deploymentId,
+              'BUILDING',
+              'WARN',
+              `Notice: async Lambda dispatch fallback: ${
+                err instanceof Error ? err.message : String(err)
+              }`
+            );
+          });
+      } catch {
+        // Fall back to queue worker
+      }
+    }
   }
 
-  private async executePipeline(
+  public async executePipeline(
     deploymentId: string,
     cloneUrl: string,
     domainConfig?: ConfiguredDomain,
