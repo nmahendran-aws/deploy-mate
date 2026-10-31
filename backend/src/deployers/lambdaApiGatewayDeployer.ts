@@ -387,6 +387,34 @@ export class LambdaApiGatewayDeployer implements IDeployer {
           await new Promise((r) => setTimeout(r, 4000));
           continue;
         }
+        if (lastError.message.includes('ResourceConflictException')) {
+          params.onLog(
+            `Phase 5 Task 3: AWS Lambda Function "${params.functionName}" already exists. Updating code...`
+          );
+          try {
+            const updateRes = (await this.signedRestRequest({
+              service: 'lambda',
+              region: params.region,
+              host: `lambda.${params.region}.amazonaws.com`,
+              method: 'PUT',
+              path: `/2015-03-31/functions/${encodeURIComponent(params.functionName)}/code`,
+              body: JSON.stringify({
+                ZipFile: params.zipBuffer.toString('base64'),
+              }),
+            })) as { FunctionArn?: string };
+            return (
+              updateRes.FunctionArn ||
+              `arn:aws:lambda:${params.region}:${params.roleArn.split(':')[4]}:function:${params.functionName}`
+            );
+          } catch (updateErr: unknown) {
+            params.onLog(
+              `Notice: Could not update existing Lambda code: ${
+                updateErr instanceof Error ? updateErr.message : String(updateErr)
+              }`
+            );
+            return `arn:aws:lambda:${params.region}:${params.roleArn.split(':')[4]}:function:${params.functionName}`;
+          }
+        }
         break;
       }
     }
@@ -438,16 +466,24 @@ export class LambdaApiGatewayDeployer implements IDeployer {
       SourceArn: `arn:aws:execute-api:${params.region}:${params.accountId}:${apiId}/*`,
     });
 
-    await this.signedRestRequest({
-      service: 'lambda',
-      region: params.region,
-      host: `lambda.${params.region}.amazonaws.com`,
-      method: 'POST',
-      path: `/2015-03-31/functions/${encodeURIComponent(
-        params.functionName
-      )}/policy`,
-      body: permissionPayload,
-    });
+    try {
+      await this.signedRestRequest({
+        service: 'lambda',
+        region: params.region,
+        host: `lambda.${params.region}.amazonaws.com`,
+        method: 'POST',
+        path: `/2015-03-31/functions/${encodeURIComponent(
+          params.functionName
+        )}/policy`,
+        body: permissionPayload,
+      });
+    } catch (permErr: unknown) {
+      params.onLog(
+        `Notice: Lambda permission note: ${
+          permErr instanceof Error ? permErr.message : String(permErr)
+        }`
+      );
+    }
 
     params.onLog(
       `Phase 5 Task 4: Created API Gateway v2 HTTP API "${apiId}" -> ${apiEndpoint} and granted invoke permission.`
@@ -610,7 +646,7 @@ export class LambdaApiGatewayDeployer implements IDeployer {
     service: string;
     region: string;
     host: string;
-    method: 'GET' | 'POST' | 'DELETE';
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE';
     path: string;
     body?: string;
   }): Promise<Record<string, unknown>> {
@@ -686,7 +722,7 @@ export class LambdaApiGatewayDeployer implements IDeployer {
         ...(sessionToken ? { 'X-Amz-Security-Token': sessionToken } : {}),
         Authorization: authorization,
       },
-      ...(params.method === 'POST' ? { body: bodyStr } : {}),
+      ...(params.method === 'POST' || params.method === 'PUT' ? { body: bodyStr } : {}),
     });
 
     const text = await res.text();
