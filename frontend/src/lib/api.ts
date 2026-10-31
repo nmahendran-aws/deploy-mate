@@ -24,6 +24,7 @@ export type DeploymentTarget =
   | 'ECS_FARGATE'
   | 'LAMBDA_API_GATEWAY'
   | 'AMPLIFY'
+  | 'FULLSTACK_SERVERLESS'
   | 'GCP_STORAGE_CDN'
   | 'GCP_CLOUD_RUN'
   | 'GCP_CLOUD_FUNCTIONS'

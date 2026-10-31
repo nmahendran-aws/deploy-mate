@@ -155,6 +155,25 @@ const DEFAULT_TARGET_META: Array<{
     awsServices: ['Auto amplify.yml Spec', 'Amplify WEB_COMPUTE', 'Managed SSR Edge', 'Route 53 Custom Domain'],
     estBaseMonthlyCost: 1.5,
   },
+  {
+    target: 'FULLSTACK_SERVERLESS',
+    title: 'S3 + CloudFront + Lambda',
+    subtitle: 'Zero-Cost Full-Stack Serverless (Web + Express API)',
+    phaseBadge: '100% Free Tier ($0/mo)',
+    isLiveReady: true,
+    icon: '✨',
+    accentGradient: 'from-emerald-500/20 via-teal-500/10 to-transparent',
+    activeBorder: 'border-emerald-400 shadow-lg shadow-emerald-500/20 ring-1 ring-emerald-400/50',
+    badgeClass: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
+    barColor: 'bg-gradient-to-r from-emerald-400 to-teal-500',
+    awsServices: [
+      'Private S3 Bucket (Static UI)',
+      'CloudFront Multi-Origin (OAC)',
+      'AWS Lambda (Express /api/*)',
+      'Route 53 Alias + ACM TLS',
+    ],
+    estBaseMonthlyCost: 0.0,
+  },
 ];
 
 const THEME_CONFIG: Record<

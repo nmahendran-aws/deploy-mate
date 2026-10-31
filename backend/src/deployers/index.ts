@@ -8,6 +8,7 @@ import {
 import { amplifyDeployer } from './amplifyDeployer';
 import { CloudProviderNotAvailableError, IDeployer } from './baseDeployer';
 import { ecsFargateDeployer } from './ecsFargateDeployer';
+import { fullstackServerlessDeployer } from './fullstackServerlessDeployer';
 import { lambdaApiGatewayDeployer } from './lambdaApiGatewayDeployer';
 import { s3CloudFrontDeployer } from './s3CloudFrontDeployer';
 
@@ -20,6 +21,7 @@ const AWS_DEPLOYER_REGISTRY: Record<AwsDeploymentTarget, IDeployer> = {
   ECS_FARGATE: ecsFargateDeployer,
   LAMBDA_API_GATEWAY: lambdaApiGatewayDeployer,
   AMPLIFY: amplifyDeployer,
+  FULLSTACK_SERVERLESS: fullstackServerlessDeployer,
 };
 
 const MULTI_CLOUD_ARCHETYPE_TARGETS: Record<
@@ -59,6 +61,7 @@ export function inferArchetypeFromTarget(
 ): WorkloadArchetype {
   switch (target) {
     case 'S3_CLOUDFRONT':
+    case 'FULLSTACK_SERVERLESS':
     case 'GCP_STORAGE_CDN':
     case 'AZURE_STATIC_FRONTDOOR':
       return 'STATIC_EDGE';

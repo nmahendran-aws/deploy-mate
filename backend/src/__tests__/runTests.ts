@@ -64,7 +64,7 @@ async function runPhase1To3Tests(): Promise<void> {
   assert.strictEqual(viteResult.buildCommand, 'npm run build');
   assert.strictEqual(viteResult.outputDirectory, 'dist');
   assert.strictEqual(viteResult.recommendedTarget, 'S3_CLOUDFRONT');
-  assert.strictEqual(viteResult.targetOptions?.length, 4, 'Expected all 4 target options in Phase 3');
+  assert.strictEqual(viteResult.targetOptions?.length, 5, 'Expected all 5 target options');
 
   // Target 2: ECS_FARGATE (Express + Dockerfile)
   const ecsResult = analyzer.evaluateSnapshot({

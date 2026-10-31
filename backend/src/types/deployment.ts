@@ -19,7 +19,8 @@ export type AwsDeploymentTarget =
   | 'S3_CLOUDFRONT'
   | 'ECS_FARGATE'
   | 'LAMBDA_API_GATEWAY'
-  | 'AMPLIFY';
+  | 'AMPLIFY'
+  | 'FULLSTACK_SERVERLESS';
 
 export type GcpDeploymentTarget =
   | 'GCP_STORAGE_CDN'

@@ -616,6 +616,20 @@ export class RepositoryAnalyzer {
             ? `Optimal for ${framework}: native Next.js App Router / SSR compute and Git branch deployment.`
             : 'Managed hosting alternative for Next.js SSR and Git-connected frontend apps.',
       },
+      {
+        target: 'FULLSTACK_SERVERLESS',
+        cloudProvider: 'AWS',
+        archetype: 'STATIC_EDGE',
+        title: 'S3 + CloudFront + Lambda',
+        subtitle: 'Zero-Cost Full-Stack Serverless (Web + Express API)',
+        fitScore:
+          applicationType === 'monorepo' || applicationType === 'containerized-service'
+            ? 96
+            : 60,
+        recommended: recommendedTarget === 'FULLSTACK_SERVERLESS',
+        reason:
+          '100% Free Tier ($0/mo): Routes /* to static S3 via CloudFront OAC, and /api/* to Express API on AWS Lambda.',
+      },
     ];
 
     return options;
@@ -872,6 +886,7 @@ export class RepositoryAnalyzer {
       ECS_FARGATE: 'Amazon ECS Fargate container service behind an Application Load Balancer',
       LAMBDA_API_GATEWAY: 'AWS Lambda serverless function fronted by Amazon API Gateway',
       AMPLIFY: 'AWS Amplify Managed Hosting with SSR compute support',
+      FULLSTACK_SERVERLESS: 'Zero-Cost Full-Stack Serverless (S3 + CloudFront + Lambda)',
       GCP_STORAGE_CDN: 'Google Cloud Storage + Cloud CDN with Managed SSL',
       GCP_CLOUD_RUN: 'Google Cloud Run serverless container service',
       GCP_CLOUD_FUNCTIONS: 'Google Cloud Functions Gen2 + API Gateway',
