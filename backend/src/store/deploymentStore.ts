@@ -132,8 +132,10 @@ export class DeploymentStore implements IDeploymentRepository {
       void this.initializePostgresPool(process.env.DATABASE_URL);
     }
 
-    if (this.isDefaultStore && process.env.DEPLOYMATE_STATE_BUCKET && process.env.FORCE_DRY_RUN_TEST !== 'true') {
-      this.s3StateBucket = process.env.DEPLOYMATE_STATE_BUCKET;
+    const stateBucket =
+      process.env.DEPLOYMATE_STATE_BUCKET || process.env.S3_STATE_BUCKET;
+    if (this.isDefaultStore && stateBucket && process.env.FORCE_DRY_RUN_TEST !== 'true') {
+      this.s3StateBucket = stateBucket;
       this.s3Client = new S3Client({
         region: process.env.AWS_REGION || 'us-east-1',
       });

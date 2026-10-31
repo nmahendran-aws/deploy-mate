@@ -282,7 +282,16 @@ export class FullstackServerlessDeployer implements IDeployer {
       },
       userEnvVars: {
         NODE_ENV: 'production',
-        S3_STATE_BUCKET: process.env.S3_STATE_BUCKET || 'repo2cloud-static-dep2b0aa15c',
+        DEPLOYMATE_STATE_BUCKET:
+          process.env.DEPLOYMATE_STATE_BUCKET ||
+          process.env.S3_STATE_BUCKET ||
+          'repo2cloud-static-dep2b0aa15c',
+        S3_STATE_BUCKET:
+          process.env.DEPLOYMATE_STATE_BUCKET ||
+          process.env.S3_STATE_BUCKET ||
+          'repo2cloud-static-dep2b0aa15c',
+        BUILD_ENGINE: 'codebuild',
+        AWS_DRY_RUN: 'false',
         ...(ctx.userEnvVars || {}),
       },
     });
