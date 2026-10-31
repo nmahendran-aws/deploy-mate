@@ -178,20 +178,25 @@ export class DeploymentStore implements IDeploymentRepository {
     }
   }
 
-  public async syncToS3(): Promise<void> {
-    if (!this.s3Client || !this.s3StateBucket) return;
-    try {
-      await this.s3Client.send(
-        new PutObjectCommand({
-          Bucket: this.s3StateBucket,
-          Key: this.s3StateKey,
-          Body: JSON.stringify(this.db, null, 2),
-          ContentType: 'application/json',
-        })
-      );
-    } catch {
-      // Ignore if S3 sync fails
-    }
+  private s3SyncChain: Promise<void> = Promise.resolve();
+
+  public syncToS3(): Promise<void> {
+    if (!this.s3Client || !this.s3StateBucket) return Promise.resolve();
+    this.s3SyncChain = this.s3SyncChain.then(async () => {
+      try {
+        await this.s3Client!.send(
+          new PutObjectCommand({
+            Bucket: this.s3StateBucket!,
+            Key: this.s3StateKey,
+            Body: JSON.stringify(this.db, null, 2),
+            ContentType: 'application/json',
+          })
+        );
+      } catch (err: unknown) {
+        console.error('Failed to sync state to S3:', err);
+      }
+    });
+    return this.s3SyncChain;
   }
 
   /**

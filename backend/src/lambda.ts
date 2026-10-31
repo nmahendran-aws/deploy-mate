@@ -30,7 +30,7 @@ export const handler = async (event: any, context: any) => {
       const userEnvVars = payload.userEnvVars || {};
       const ephemeralGitHubToken = payload.ephemeralGitHubToken;
 
-      if (record.status === 'FAILED') {
+      if (record.status === 'FAILED' || record.status === 'DEPLOYING') {
         deploymentStore.update(deploymentId, {
           status: 'BUILDING',
           error: null,

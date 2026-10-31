@@ -300,24 +300,29 @@ export class FullstackServerlessDeployer implements IDeployer {
     });
 
     // Step 3: CloudFront Distribution with Dual Origins
-    const oacName = `oac-${shortId}-${Date.now()}`;
-    ctx.onLog(`Creating CloudFront Origin Access Control (${oacName})...`);
-    const oacRes = await cloudfront.send(
-      new CreateOriginAccessControlCommand({
-        OriginAccessControlConfig: {
-          Name: oacName,
-          Description: `OAC for fullstack deployment ${ctx.deployment.deploymentId}`,
-          OriginAccessControlOriginType: 's3',
-          SigningBehavior: 'always',
-          SigningProtocol: 'sigv4',
-        },
-      })
-    );
-    const oacId = oacRes.OriginAccessControl?.Id;
+    let oacId = ctx.deployment.resources?.cloudFrontOacId;
     if (!oacId) {
-      throw new Error('Failed to create CloudFront Origin Access Control.');
+      const oacName = `oac-${shortId}-${Date.now()}`;
+      ctx.onLog(`Creating CloudFront Origin Access Control (${oacName})...`);
+      const oacRes = await cloudfront.send(
+        new CreateOriginAccessControlCommand({
+          OriginAccessControlConfig: {
+            Name: oacName,
+            Description: `OAC for fullstack deployment ${ctx.deployment.deploymentId}`,
+            OriginAccessControlOriginType: 's3',
+            SigningBehavior: 'always',
+            SigningProtocol: 'sigv4',
+          },
+        })
+      );
+      oacId = oacRes.OriginAccessControl?.Id;
+      if (!oacId) {
+        throw new Error('Failed to create CloudFront Origin Access Control.');
+      }
+      ctx.onResourceCreated({ cloudFrontOacId: oacId });
+    } else {
+      ctx.onLog(`Reusing CloudFront Origin Access Control (${oacId}).`);
     }
-    ctx.onResourceCreated({ cloudFrontOacId: oacId });
 
     const s3OriginDomain = `${bucketName}.s3.${region}.amazonaws.com`;
     const s3OriginId = `s3-static-${shortId}`;
@@ -470,7 +475,7 @@ export class FullstackServerlessDeployer implements IDeployer {
     ctx.onLog(
       `Waiting for CloudFront distribution ${distributionId} to propagate to edge locations...`
     );
-    for (let poll = 0; poll < 45; poll++) {
+    for (let poll = 0; poll < 10; poll++) {
       try {
         const getRes = await cloudfront.send(
           new GetDistributionCommand({ Id: distributionId })
@@ -484,7 +489,7 @@ export class FullstackServerlessDeployer implements IDeployer {
       } catch {
         // continue polling
       }
-      await new Promise((r) => setTimeout(r, 4000));
+      await new Promise((r) => setTimeout(r, 3000));
     }
 
     ctx.onLog(

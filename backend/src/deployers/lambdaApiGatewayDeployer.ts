@@ -145,19 +145,33 @@ export class LambdaApiGatewayDeployer implements IDeployer {
     onResourceCreated({ lambdaFunctionName: functionName });
 
     // Phase 5 Task 4: Provision API Gateway v2 HTTP API + Lambda Invoke Permission
-    const { apiId, apiEndpoint, apiDomain } = await this.createHttpApiGateway({
-      region,
-      accountId,
-      apiName,
-      functionName,
-      functionArn,
-      onLog,
-    });
+    let apiId = deployment.resources?.apiGatewayId;
+    let apiEndpoint = deployment.resources?.apiGatewayEndpoint;
+    let apiDomain = apiEndpoint
+      ? apiEndpoint.replace(/^https?:\/\//, '').replace(/\/.*$/, '')
+      : '';
 
-    onResourceCreated({
-      apiGatewayId: apiId,
-      apiGatewayEndpoint: apiEndpoint,
-    });
+    if (!apiId || !apiEndpoint) {
+      const created = await this.createHttpApiGateway({
+        region,
+        accountId,
+        apiName,
+        functionName,
+        functionArn,
+        onLog,
+      });
+      apiId = created.apiId;
+      apiEndpoint = created.apiEndpoint;
+      apiDomain = created.apiDomain;
+      onResourceCreated({
+        apiGatewayId: apiId,
+        apiGatewayEndpoint: apiEndpoint,
+      });
+    } else {
+      onLog(
+        `Phase 5 Task 4: Reusing existing API Gateway HTTP API "${apiId}" (${apiEndpoint}).`
+      );
+    }
 
     return {
       infrastructureUrl: apiEndpoint,
