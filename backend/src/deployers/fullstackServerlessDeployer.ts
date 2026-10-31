@@ -392,21 +392,7 @@ export class FullstackServerlessDeployer implements IDeployer {
             ],
           },
           CustomErrorResponses: {
-            Quantity: 2,
-            Items: [
-              {
-                ErrorCode: 403,
-                ResponsePagePath: '/index.html',
-                ResponseCode: '200',
-                ErrorCachingMinTTL: 5,
-              },
-              {
-                ErrorCode: 404,
-                ResponsePagePath: '/index.html',
-                ResponseCode: '200',
-                ErrorCachingMinTTL: 5,
-              },
-            ],
+            Quantity: 0,
           },
           ViewerCertificate: hasRealCustomDomainCert
             ? {

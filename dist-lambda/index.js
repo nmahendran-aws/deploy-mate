@@ -25167,11 +25167,49 @@ function createAuthMiddlewares(store = deploymentStore) {
     let user = store.getUserById(verification.payload.sub);
     if (!user && verification.payload.email) {
       try {
-        const session = authService.loginOrRegisterUser(
-          { email: verification.payload.email },
-          store
-        );
-        user = session.user;
+        const userId = verification.payload.sub;
+        const orgId = verification.payload.defaultOrgId;
+        const email = verification.payload.email.toLowerCase().trim();
+        const username = email.split("@")[0].replace(/[^a-z0-9-]/gi, "-").toLowerCase() || "dev";
+        const now = (/* @__PURE__ */ new Date()).toISOString();
+        user = store.upsertUser({
+          userId,
+          email,
+          displayName: username,
+          username,
+          authProvider: "github",
+          studentVerified: email.endsWith(".edu"),
+          createdAt: now,
+          updatedAt: now
+        });
+        if (orgId) {
+          const org = store.getOrganization(orgId);
+          if (!org) {
+            try {
+              store.createOrganization({
+                orgId,
+                name: `${username}'s Workspace`,
+                slug: `${username}-workspace-${userId.slice(-4)}`,
+                planTier: "CAMPUS_FREE",
+                ownerUserId: userId,
+                createdAt: now,
+                updatedAt: now
+              });
+            } catch {
+            }
+          }
+          const role = store.getUserRoleInOrg(orgId, userId);
+          if (!role) {
+            store.upsertMembership({
+              membershipId: `mem_${userId.slice(-6)}_${orgId.slice(-6)}`,
+              orgId,
+              userId,
+              role: "OWNER",
+              createdAt: now,
+              updatedAt: now
+            });
+          }
+        }
       } catch {
       }
     }
@@ -29496,21 +29534,7 @@ var FullstackServerlessDeployer = class {
             ]
           },
           CustomErrorResponses: {
-            Quantity: 2,
-            Items: [
-              {
-                ErrorCode: 403,
-                ResponsePagePath: "/index.html",
-                ResponseCode: "200",
-                ErrorCachingMinTTL: 5
-              },
-              {
-                ErrorCode: 404,
-                ResponsePagePath: "/index.html",
-                ResponseCode: "200",
-                ErrorCachingMinTTL: 5
-              }
-            ]
+            Quantity: 0
           },
           ViewerCertificate: hasRealCustomDomainCert ? {
             ACMCertificateArn: ctx.acmCertificateArn,

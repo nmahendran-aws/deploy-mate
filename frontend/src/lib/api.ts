@@ -324,6 +324,33 @@ function buildHeaders(includeJson = false): Record<string, string> {
   return headers;
 }
 
+async function safeParseJson<T = any>(res: Response, fallbackError = 'Request failed'): Promise<T> {
+  const text = await res.text();
+  let data: any = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    if (!res.ok) {
+      if (res.status === 401) {
+        setStoredSession(null);
+      }
+      throw new Error(`Server returned HTTP ${res.status}: ${res.statusText || fallbackError}`);
+    }
+    throw new Error(`Invalid response from server: ${text.slice(0, 100)}`);
+  }
+
+  if (!res.ok) {
+    if (res.status === 401) {
+      setStoredSession(null);
+    }
+    const msg = data.error || data.message || `HTTP ${res.status}: ${fallbackError}`;
+    const detail = data.remediation ? ` — ${data.remediation}` : '';
+    throw new Error(`${msg}${detail}`);
+  }
+
+  return data as T;
+}
+
 /**
  * POST /api/auth/session
  * DM-904: OAuth / Email sign-in with automatic .edu student verification & Personal Workspace provisioning.
@@ -345,10 +372,7 @@ export async function signInSession(params: {
     credentials: 'include',
     body: JSON.stringify(params),
   });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to sign in');
-  }
+  const data = await safeParseJson(res, 'Failed to sign in');
   setStoredSession(data.token, data.defaultOrganization?.orgId);
   return data;
 }
@@ -372,7 +396,7 @@ export async function fetchCurrentSession(): Promise<{
     setStoredSession(null);
     return null;
   }
-  return res.json();
+  return safeParseJson(res, 'Failed to fetch session');
 }
 
 /**
@@ -408,11 +432,7 @@ export async function createTeamOrganization(params: {
     credentials: 'include',
     body: JSON.stringify(params),
   });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to create organization');
-  }
-  return data;
+  return safeParseJson(res, 'Failed to create organization');
 }
 
 /**
@@ -425,11 +445,7 @@ export async function listOrganizationMembers(orgId: string): Promise<{
     headers: buildHeaders(),
     credentials: 'include',
   });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to list members');
-  }
-  return data;
+  return safeParseJson(res, 'Failed to list members');
 }
 
 /**
@@ -448,11 +464,7 @@ export async function inviteOrganizationMember(
     credentials: 'include',
     body: JSON.stringify(params),
   });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to invite member');
-  }
-  return data;
+  return safeParseJson(res, 'Failed to invite member');
 }
 
 /**
@@ -463,10 +475,7 @@ export async function fetchQueueStatus(): Promise<QueueSnapshot> {
   const res = await fetch(`${getApiBase()}/queue/status`, {
     headers: buildHeaders(),
   });
-  if (!res.ok) {
-    throw new Error('Failed to fetch worker queue status');
-  }
-  return res.json();
+  return safeParseJson(res, 'Failed to fetch worker queue status');
 }
 
 /**
@@ -488,11 +497,7 @@ export async function analyzeRepository(
     headers: buildHeaders(true),
     body: JSON.stringify({ repoUrl, branch }),
   });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to analyze repository');
-  }
-  return data;
+  return safeParseJson(res, 'Failed to analyze repository');
 }
 
 /**
@@ -519,10 +524,7 @@ export async function fetchDomainsAndCheckSubdomain(
   const res = await fetch(`${getApiBase()}/domains${query}`, {
     headers: buildHeaders(),
   });
-  if (!res.ok) {
-    throw new Error('Failed to load server-controlled domains');
-  }
-  return res.json();
+  return safeParseJson(res, 'Failed to load server-controlled domains');
 }
 
 /**
@@ -589,15 +591,7 @@ export async function createStaticDeployment(payload: {
     }),
   });
 
-  const data = await res.json();
-  if (!res.ok) {
-    if (res.status === 401) {
-      setStoredSession(null);
-    }
-    const detail = data.remediation ? ` — ${data.remediation}` : '';
-    throw new Error(`${data.error || 'Failed to start deployment'}${detail}`);
-  }
-  return data;
+  return safeParseJson(res, 'Failed to start deployment');
 }
 
 /**
@@ -615,11 +609,7 @@ export async function getDeploymentStatus(deploymentId: string): Promise<{
     headers: buildHeaders(),
     credentials: 'include',
   });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to fetch deployment status');
-  }
-  return data;
+  return safeParseJson(res, 'Failed to fetch deployment status');
 }
 
 /**
@@ -632,11 +622,7 @@ export async function listDeployments(): Promise<{
     headers: buildHeaders(),
     credentials: 'include',
   });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to fetch deployments');
-  }
-  return data;
+  return safeParseJson(res, 'Failed to fetch deployments');
 }
 
 /**
@@ -654,11 +640,7 @@ export async function deleteDeploymentInfrastructure(
     headers: buildHeaders(),
     credentials: 'include',
   });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to delete deployment infrastructure');
-  }
-  return data;
+  return safeParseJson(res, 'Failed to delete deployment infrastructure');
 }
 
 export interface SecurityGuardrailsStatus {
@@ -690,10 +672,7 @@ export async function fetchSecurityStatus(): Promise<SecurityGuardrailsStatus> {
   const res = await fetch(`${getApiBase()}/security/status`, {
     headers: buildHeaders(),
   });
-  if (!res.ok) {
-    throw new Error('Failed to fetch Phase 7 security guardrails status');
-  }
-  return res.json();
+  return safeParseJson(res, 'Failed to fetch Phase 7 security guardrails status');
 }
 
 export interface ObservabilityMetrics {
@@ -723,10 +702,7 @@ export async function fetchObservabilityMetrics(): Promise<ObservabilityMetrics>
   const res = await fetch(`${getApiBase()}/observability/metrics`, {
     headers: buildHeaders(),
   });
-  if (!res.ok) {
-    throw new Error('Failed to fetch Phase 8 observability metrics');
-  }
-  return res.json();
+  return safeParseJson(res, 'Failed to fetch Phase 8 observability metrics');
 }
 
 /**
@@ -745,11 +721,7 @@ export async function retryFailedDeployment(deploymentId: string): Promise<{
       credentials: 'include',
     }
   );
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to retry deployment');
-  }
-  return data;
+  return safeParseJson(res, 'Failed to retry deployment');
 }
 
 /**
@@ -776,11 +748,7 @@ export async function connectGitHubInstallation(params: {
     credentials: 'include',
     body: JSON.stringify(params),
   });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to connect GitHub App installation');
-  }
-  return data;
+  return safeParseJson(res, 'Failed to connect GitHub App installation');
 }
 
 /**
@@ -804,11 +772,7 @@ export async function fetchGitHubRepos(
       credentials: 'include',
     }
   );
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to load GitHub App repositories');
-  }
-  return data;
+  return safeParseJson(res, 'Failed to load GitHub App repositories');
 }
 
 /**
@@ -825,11 +789,7 @@ export async function parseDotEnvPreview(dotEnvText: string): Promise<{
     credentials: 'include',
     body: JSON.stringify({ dotEnvText }),
   });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to parse .env content');
-  }
-  return data;
+  return safeParseJson(res, 'Failed to parse .env content');
 }
 
 /**
@@ -854,9 +814,5 @@ export async function rollbackProjectDeployment(
       credentials: 'include',
     }
   );
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || 'Failed to execute instant rollback');
-  }
-  return data;
+  return safeParseJson(res, 'Failed to execute instant rollback');
 }
