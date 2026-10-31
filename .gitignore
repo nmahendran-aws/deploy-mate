@@ -6,8 +6,8 @@ node_modules/
 # Next.js / Build outputs
 .next/
 out/
-dist/
 build/
+backend/dist/
 
 # Environment variables
 .env

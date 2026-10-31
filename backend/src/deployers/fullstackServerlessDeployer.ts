@@ -170,9 +170,11 @@ export class FullstackServerlessDeployer implements IDeployer {
     // Determine frontend static export directory
     let staticDir = ctx.buildResult.artifactDir;
     const candidates = [
+      path.join(ctx.buildResult.repoDir, 'dist'),
       path.join(ctx.buildResult.repoDir, 'frontend', 'out'),
       path.join(ctx.buildResult.repoDir, 'out'),
-      path.join(ctx.buildResult.repoDir, 'dist'),
+      path.join(process.cwd(), 'dist'),
+      path.join(process.cwd(), 'frontend', 'out'),
       ctx.buildResult.artifactDir,
     ];
     for (const c of candidates) {
@@ -222,13 +224,29 @@ export class FullstackServerlessDeployer implements IDeployer {
     );
     const lambdaEntry = path.join(ctx.buildResult.repoDir, 'backend', 'src', 'lambda.ts');
     const bundledOut = path.join(ctx.buildResult.repoDir, 'index.js');
-    if (fs.existsSync(lambdaEntry)) {
+    const prebuiltLambda = path.join(process.cwd(), 'dist-lambda', 'index.js');
+
+    if (fs.existsSync(prebuiltLambda)) {
+      fs.copyFileSync(prebuiltLambda, bundledOut);
+      ctx.onLog(
+        `Phase 10: Deployed pre-bundled standalone serverless Express API (${(
+          fs.statSync(bundledOut).size / 1024
+        ).toFixed(1)} KB).`
+      );
+    } else if (fs.existsSync(lambdaEntry)) {
       try {
+        const rootNodeModules = path.join(process.cwd(), 'node_modules');
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const { execSync } = require('child_process');
         execSync(
           `npx esbuild "${lambdaEntry}" --bundle --platform=node --target=node20 --outfile="${bundledOut}" --external:@aws-sdk`,
-          { stdio: 'pipe' }
+          {
+            stdio: 'pipe',
+            env: {
+              ...process.env,
+              NODE_PATH: `${rootNodeModules}:${path.join(ctx.buildResult.repoDir, 'node_modules')}`,
+            },
+          }
         );
         ctx.onLog(
           `Phase 10: Bundled backend API into standalone index.js (${(
@@ -446,6 +464,26 @@ export class FullstackServerlessDeployer implements IDeployer {
       );
     } catch (err: unknown) {
       ctx.onLog(`S3 bucket policy note: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    ctx.onLog(
+      `Waiting for CloudFront distribution ${distributionId} to propagate to edge locations...`
+    );
+    for (let poll = 0; poll < 45; poll++) {
+      try {
+        const getRes = await cloudfront.send(
+          new GetDistributionCommand({ Id: distributionId })
+        );
+        if (getRes.Distribution?.Status === 'Deployed') {
+          ctx.onLog(
+            `CloudFront distribution ${distributionId} reached "Deployed" status.`
+          );
+          break;
+        }
+      } catch {
+        // continue polling
+      }
+      await new Promise((r) => setTimeout(r, 4000));
     }
 
     ctx.onLog(

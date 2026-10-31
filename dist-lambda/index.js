@@ -27415,10 +27415,10 @@ def handler(event, context):
     const relFiles = this.listFilesRecursively(params.repoDir, params.repoDir).filter(
       (f) => !f.startsWith("node_modules/") && !f.startsWith(".git/") && !f.endsWith(".tar.gz")
     );
-    for (const rel of relFiles.slice(0, 60)) {
+    for (const rel of relFiles.slice(0, 100)) {
       const abs = import_path4.default.join(params.repoDir, rel);
       const stat = import_fs3.default.statSync(abs);
-      if (stat.isFile() && stat.size <= 2 * 1024 * 1024) {
+      if (stat.isFile() && stat.size <= 15 * 1024 * 1024) {
         entries.push({
           name: rel.split(import_path4.default.sep).join("/"),
           data: import_fs3.default.readFileSync(abs)
@@ -29044,15 +29044,33 @@ var FullstackServerlessDeployer = class {
     }
     ctx.onLog("Uploaded static frontend assets to private S3 bucket.");
     ctx.onLog(
-      `Phase 10: Packaging and deploying serverless Express API to AWS Lambda (${functionName})...`
+      `Phase 10: Bundling serverless Express API handler with esbuild...`
     );
+    const lambdaEntry = import_path6.default.join(ctx.buildResult.repoDir, "backend", "src", "lambda.ts");
+    const bundledOut = import_path6.default.join(ctx.buildResult.repoDir, "index.js");
+    if (import_fs5.default.existsSync(lambdaEntry)) {
+      try {
+        const { execSync: execSync2 } = require("child_process");
+        execSync2(
+          `npx esbuild "${lambdaEntry}" --bundle --platform=node --target=node20 --outfile="${bundledOut}" --external:@aws-sdk`,
+          { stdio: "pipe" }
+        );
+        ctx.onLog(
+          `Phase 10: Bundled backend API into standalone index.js (${(import_fs5.default.statSync(bundledOut).size / 1024).toFixed(1)} KB).`
+        );
+      } catch (e) {
+        ctx.onLog(
+          `Notice: esbuild bundling fell back: ${e instanceof Error ? e.message : String(e)}`
+        );
+      }
+    }
     const lambdaDeployOutput = await lambdaApiGatewayDeployer.deploy({
       ...ctx,
       deployment: {
         ...ctx.deployment,
         targetConfig: {
           ...ctx.deployment.targetConfig,
-          lambdaHandler: "backend/dist/lambda.handler",
+          lambdaHandler: "index.handler",
           runtime: "nodejs20.x"
         }
       }
@@ -29162,7 +29180,7 @@ var FullstackServerlessDeployer = class {
                   }
                 },
                 Compress: true,
-                CachePolicyId: "4135ea2d-6df8-44a3-9df3-447a4428a86f",
+                CachePolicyId: "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
                 // Managed CachingDisabled
                 OriginRequestPolicyId: "b689b0a8-53d0-40ab-baf2-68738e2966ac"
                 // Managed AllViewerExceptHostHeader

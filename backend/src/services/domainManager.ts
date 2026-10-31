@@ -368,7 +368,7 @@ ${aaaaChangeXml}
     const urlToVerify = isPlaceholderZone ? fallbackCloudFrontUrl : url;
     onLog?.(`Task 8: Verifying live HTTPS reachability at ${urlToVerify}...`);
 
-    for (let attempt = 1; attempt <= 12; attempt++) {
+    for (let attempt = 1; attempt <= 30; attempt++) {
       // For custom subdomains, verify TLS SNI + Host header directly against the CloudFront edge first
       // so the backend never triggers a premature OS DNS lookup that could cache NXDOMAIN on local VPN DNS.
       if (urlToVerify !== fallbackCloudFrontUrl && fallbackCloudFrontUrl) {

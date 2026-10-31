@@ -277,7 +277,13 @@ export class IsolatedBuildRunner {
             const depCount =
               Object.keys(parsedPkg.dependencies || {}).length +
               Object.keys(parsedPkg.devDependencies || {}).length;
-            if (depCount === 0 || fs.existsSync(path.join(params.repoDir, 'node_modules'))) {
+            const hasWorkspaces = Boolean(
+              (parsedPkg as { workspaces?: unknown })?.workspaces
+            );
+            if (
+              (depCount === 0 && !hasWorkspaces) ||
+              fs.existsSync(path.join(params.repoDir, 'node_modules'))
+            ) {
               needsNpmInstall = false;
             }
           } catch {
