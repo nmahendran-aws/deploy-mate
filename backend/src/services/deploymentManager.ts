@@ -439,6 +439,11 @@ export class DeploymentManager {
         });
       },
       processor: async (payload) => {
+        // In AWS Lambda, background execution is handled exclusively by async self-invocation below
+        // to avoid duplicate execution on the HTTP container.
+        if (process.env.AWS_LAMBDA_FUNCTION_NAME) {
+          return;
+        }
         await this.executePipeline(
           payload.deploymentId,
           payload.cloneUrl,

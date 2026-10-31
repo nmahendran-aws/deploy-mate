@@ -136,8 +136,8 @@ phases:
       - ${buildCmd}
   post_build:
     commands:
-      - echo "Archiving compiled build output from ${outputDir}..."
-      - if [ -d "${outputDir}" ]; then tar -czf /tmp/artifacts.tar.gz -C ${outputDir} .; elif [ -d "dist" ]; then tar -czf /tmp/artifacts.tar.gz -C dist .; else tar -czf /tmp/artifacts.tar.gz .; fi
+      - echo "Archiving compiled build output..."
+      - if [ -d "${outputDir}" ] && [ "${outputDir}" != "." ]; then tar -czf /tmp/artifacts.tar.gz -C "${outputDir}" .; elif [ -d "out" ]; then tar -czf /tmp/artifacts.tar.gz -C out .; elif [ -d "dist" ]; then tar -czf /tmp/artifacts.tar.gz -C dist .; elif [ -d "build" ]; then tar -czf /tmp/artifacts.tar.gz -C build .; elif [ -d ".next" ]; then tar --exclude=cache -czf /tmp/artifacts.tar.gz -C .next .; else tar --exclude=node_modules --exclude=.git -czf /tmp/artifacts.tar.gz .; fi
       - echo "Uploading build artifacts to s3://${artifactS3Bucket}/${artifactS3Key}..."
       - aws s3 cp /tmp/artifacts.tar.gz s3://${artifactS3Bucket}/${artifactS3Key}
       - echo "Build and upload completed successfully."
