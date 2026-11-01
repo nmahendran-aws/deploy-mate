@@ -61,13 +61,21 @@ export class RepositoryAnalyzer {
         ephemeralGitHubToken
       );
       if (snapshot.files.length > 0 || snapshot.packageJson) {
-        return this.evaluateSnapshot(snapshot);
+        return { ...this.evaluateSnapshot(snapshot), analysisSource: 'repository' };
       }
     } catch {
       // Fallback to heuristic URL inspection when offline or rate-limited
     }
 
-    return this.evaluateHeuristicFromRepoName(owner, repo);
+    const guessed = this.evaluateHeuristicFromRepoName(owner, repo);
+    return {
+      ...guessed,
+      analysisSource: 'name-heuristic',
+      warnings: [
+        ...guessed.warnings,
+        'Could not read this repository from GitHub (rate limit, private repo, or offline), so this recommendation is only a guess from the repository name. Connect the GitHub App or retry before relying on it.',
+      ],
+    };
   }
 
   /**
@@ -734,77 +742,142 @@ export class RepositoryAnalyzer {
 
     try {
       const res = await fetch(contentsUrl, { headers, signal: controller.signal });
-      if (!res.ok) {
-        throw new Error(`GitHub API responded with ${res.status}`);
-      }
+      if (res.ok) {
+        const items = (await res.json()) as Array<{ name: string; type: string; download_url?: string }>;
+        if (Array.isArray(items)) {
+          const files = items.map((item) => item.name);
+          const snapshot: RepoInspectionSnapshot = { files };
 
-      const items = (await res.json()) as Array<{ name: string; type: string; download_url?: string }>;
-      if (!Array.isArray(items)) {
-        throw new Error('Unexpected GitHub contents payload');
-      }
+          const fetchFileText = async (fileName: string): Promise<string | undefined> => {
+            const found = items.find((i) => i.name.toLowerCase() === fileName.toLowerCase());
+            if (!found || !found.download_url) return undefined;
+            const fileRes = await fetch(found.download_url, {
+              headers: token ? { Authorization: `Bearer ${token}`, 'User-Agent': 'Repo2Cloud-Analyzer/1.0' } : undefined,
+              signal: controller.signal,
+            });
+            if (!fileRes.ok) return undefined;
+            return await fileRes.text();
+          };
 
-      const files = items.map((item) => item.name);
-      const snapshot: RepoInspectionSnapshot = { files };
-
-      const fetchFileText = async (fileName: string): Promise<string | undefined> => {
-        const found = items.find((i) => i.name.toLowerCase() === fileName.toLowerCase());
-        if (!found || !found.download_url) return undefined;
-        const fileRes = await fetch(found.download_url, {
-          headers: token ? { Authorization: `Bearer ${token}`, 'User-Agent': 'Repo2Cloud-Analyzer/1.0' } : undefined,
-          signal: controller.signal,
-        });
-        if (!fileRes.ok) return undefined;
-        return await fileRes.text();
-      };
-
-      const pkgText = await fetchFileText('package.json');
-      if (pkgText) {
-        try {
-          snapshot.packageJson = JSON.parse(pkgText);
-        } catch {
-          // ignore malformed JSON
-        }
-      }
-
-      // Check if backend workspace directory exists
-      const hasBackendDir = items.some(
-        (i) => i.name.toLowerCase() === 'backend' && (i.type === 'dir' || !i.download_url)
-      );
-      if (hasBackendDir) {
-        try {
-          const backendContentsUrl = `https://api.github.com/repos/${owner}/${repo}/contents/backend/package.json${refQuery}`;
-          const bRes = await fetch(backendContentsUrl, { headers, signal: controller.signal });
-          if (bRes.ok) {
-            const bItem = (await bRes.json()) as { download_url?: string };
-            if (bItem?.download_url) {
-              const bFileRes = await fetch(bItem.download_url, {
-                headers: token
-                  ? { Authorization: `Bearer ${token}`, 'User-Agent': 'Repo2Cloud-Analyzer/1.0' }
-                  : undefined,
-                signal: controller.signal,
-              });
-              if (bFileRes.ok) {
-                snapshot.backendPackageJson = JSON.parse(await bFileRes.text());
-              }
+          const pkgText = await fetchFileText('package.json');
+          if (pkgText) {
+            try {
+              snapshot.packageJson = JSON.parse(pkgText);
+            } catch {
+              // ignore malformed JSON
             }
           }
-        } catch {
-          // ignore
+
+          // Check if backend workspace directory exists
+          const hasBackendDir = items.some(
+            (i) => i.name.toLowerCase() === 'backend' && (i.type === 'dir' || !i.download_url)
+          );
+          if (hasBackendDir) {
+            try {
+              const backendContentsUrl = `https://api.github.com/repos/${owner}/${repo}/contents/backend/package.json${refQuery}`;
+              const bRes = await fetch(backendContentsUrl, { headers, signal: controller.signal });
+              if (bRes.ok) {
+                const bItem = (await bRes.json()) as { download_url?: string };
+                if (bItem?.download_url) {
+                  const bFileRes = await fetch(bItem.download_url, {
+                    headers: token
+                      ? { Authorization: `Bearer ${token}`, 'User-Agent': 'Repo2Cloud-Analyzer/1.0' }
+                      : undefined,
+                    signal: controller.signal,
+                  });
+                  if (bFileRes.ok) {
+                    snapshot.backendPackageJson = JSON.parse(await bFileRes.text());
+                  }
+                }
+              }
+            } catch {
+              // ignore
+            }
+          }
+
+          snapshot.nextConfigContent =
+            (await fetchFileText('next.config.js')) ||
+            (await fetchFileText('next.config.mjs')) ||
+            (await fetchFileText('next.config.ts'));
+          snapshot.dockerfileContent = await fetchFileText('Dockerfile');
+          snapshot.requirementsTxtContent = await fetchFileText('requirements.txt');
+          snapshot.pyprojectContent = await fetchFileText('pyproject.toml');
+
+          return snapshot;
         }
       }
+    } catch {
+      // Fallback to raw.githubusercontent.com when REST API is rate-limited or fails
+    }
 
-      snapshot.nextConfigContent =
-        (await fetchFileText('next.config.js')) ||
-        (await fetchFileText('next.config.mjs')) ||
-        (await fetchFileText('next.config.ts'));
-      snapshot.dockerfileContent = await fetchFileText('Dockerfile');
-      snapshot.requirementsTxtContent = await fetchFileText('requirements.txt');
-      snapshot.pyprojectContent = await fetchFileText('pyproject.toml');
+    // Secondary fallback: Direct raw.githubusercontent.com inspection (unaffected by REST rate limits)
+    try {
+      const branchesToTry = [branch || 'main', 'master'];
+      for (const b of branchesToTry) {
+        const rawBase = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeURIComponent(b)}`;
+        const fetchRaw = async (filePath: string): Promise<string | undefined> => {
+          try {
+            const rawRes = await fetch(`${rawBase}/${filePath}`, {
+              headers: { 'User-Agent': 'Repo2Cloud-Analyzer/1.0' },
+              signal: controller.signal,
+            });
+            if (!rawRes.ok) return undefined;
+            return await rawRes.text();
+          } catch {
+            return undefined;
+          }
+        };
 
-      return snapshot;
+        const pkgText = await fetchRaw('package.json');
+        if (pkgText) {
+          const files: string[] = ['package.json'];
+          let parsedPkg: PackageJsonRecord | undefined;
+          try {
+            parsedPkg = JSON.parse(pkgText);
+          } catch {}
+
+          const nextConfig =
+            (await fetchRaw('next.config.ts')) ||
+            (await fetchRaw('next.config.mjs')) ||
+            (await fetchRaw('next.config.js'));
+          if (nextConfig) files.push('next.config.js');
+
+          const dockerfile = await fetchRaw('Dockerfile');
+          if (dockerfile) files.push('Dockerfile');
+
+          const requirementsTxt = await fetchRaw('requirements.txt');
+          if (requirementsTxt) files.push('requirements.txt');
+
+          const pyproject = await fetchRaw('pyproject.toml');
+          if (pyproject) files.push('pyproject.toml');
+
+          const serverless = (await fetchRaw('serverless.yml')) || (await fetchRaw('serverless.yaml'));
+          if (serverless) files.push('serverless.yml');
+
+          const viteConfig =
+            (await fetchRaw('vite.config.ts')) ||
+            (await fetchRaw('vite.config.js')) ||
+            (await fetchRaw('vite.config.mjs'));
+          if (viteConfig) files.push('vite.config.ts');
+
+          return {
+            files,
+            packageJson: parsedPkg,
+            nextConfigContent: nextConfig,
+            dockerfileContent: dockerfile,
+            requirementsTxtContent: requirementsTxt,
+            pyprojectContent: pyproject,
+            serverlessContent: serverless,
+          };
+        }
+      }
+    } catch {
+      // Secondary fallback exhausted
     } finally {
       clearTimeout(timeout);
     }
+
+    throw new Error(`Unable to fetch snapshot for ${owner}/${repo}`);
   }
 
   /**

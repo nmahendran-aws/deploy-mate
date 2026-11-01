@@ -85,6 +85,46 @@ const SAMPLE_REPOS: Array<{
   },
 ];
 
+function checkTargetCompatibility(
+  target: DeploymentTarget,
+  appType?: string
+): { incompatible: boolean; reason?: string } {
+  if (!appType) return { incompatible: false };
+
+  if (target === 'S3_CLOUDFRONT') {
+    if (appType === 'ssr-frontend') {
+      return {
+        incompatible: true,
+        reason:
+          'SSR frameworks (e.g. Next.js SSR) require an active Node.js server runtime. Amazon S3 is purely static storage without a runtime, causing 403 AccessDenied errors.',
+      };
+    }
+    if (appType === 'node-server' || appType === 'python-service') {
+      return {
+        incompatible: true,
+        reason:
+          'Backend API/daemon services require continuous compute (ECS Fargate) or serverless invocation (Lambda), not static file hosting.',
+      };
+    }
+    if (appType === 'containerized-service') {
+      return {
+        incompatible: true,
+        reason:
+          'Containerized Docker services must be deployed to Amazon ECS Fargate with an ALB, not static S3.',
+      };
+    }
+    if (appType === 'serverless-api') {
+      return {
+        incompatible: true,
+        reason:
+          'APIs require AWS Lambda + API Gateway execution, not static file hosting.',
+      };
+    }
+  }
+
+  return { incompatible: false };
+}
+
 const DEFAULT_TARGET_META: Array<{
   target: DeploymentTarget;
   title: string;
@@ -471,6 +511,17 @@ export default function Phase3DeployPage() {
   async function handleDeploy(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+
+    const compatibility = checkTargetCompatibility(selectedTarget, analysis?.applicationType);
+    if (compatibility.incompatible) {
+      setError(
+        `Target Incompatible: ${compatibility.reason} Please switch to recommended target: ${
+          analysis?.recommendedTarget || 'compatible target'
+        }.`
+      );
+      return;
+    }
+
     setIsDeploying(true);
 
     const envVarsObj: Record<string, string> = {};
@@ -1743,6 +1794,19 @@ export default function Phase3DeployPage() {
                         {analysis.runtime}
                       </span>
                     )}
+                    {analysis.analysisSource && (
+                      <span
+                        className={`text-[11px] font-mono px-2.5 py-0.5 rounded-full border ${
+                          analysis.analysisSource === 'repository'
+                            ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                            : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                        }`}
+                      >
+                        {analysis.analysisSource === 'repository'
+                          ? '✓ Verified Git Snapshot'
+                          : '⚡ Name Heuristic Fallback'}
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="w-24 h-2 rounded-full bg-slate-800 overflow-hidden">
@@ -1810,7 +1874,10 @@ export default function Phase3DeployPage() {
                   );
                   const isRecommended = analysis?.recommendedTarget === meta.target;
                   const isSelected = selectedTarget === meta.target;
-                  const fitPercent = optionScore?.fitScore ?? (isRecommended ? 95 : 40);
+                  const targetIncomp = checkTargetCompatibility(meta.target, analysis?.applicationType);
+                  const fitPercent = targetIncomp.incompatible
+                    ? 0
+                    : (optionScore?.fitScore ?? (isRecommended ? 95 : 40));
 
                   return (
                     <button
@@ -1821,14 +1888,22 @@ export default function Phase3DeployPage() {
                         meta.accentGradient
                       } ${
                         isSelected
-                          ? `${meta.activeBorder} bg-slate-900/95 scale-[1.01]`
+                          ? targetIncomp.incompatible
+                            ? 'border-rose-500 shadow-lg shadow-rose-500/25 ring-1 ring-rose-500/50 bg-slate-900/95 scale-[1.01]'
+                            : `${meta.activeBorder} bg-slate-900/95 scale-[1.01]`
+                          : targetIncomp.incompatible
+                          ? 'bg-slate-950/60 border-rose-900/40 opacity-70 hover:opacity-100 hover:border-rose-500'
                           : 'bg-slate-950/80 border-slate-800/90 hover:border-slate-600'
                       }`}
                     >
                       <div className="space-y-2">
                         <div className="flex items-center justify-between gap-1">
                           <span className="text-lg">{meta.icon}</span>
-                          {isRecommended ? (
+                          {targetIncomp.incompatible ? (
+                            <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-rose-500/25 text-rose-300 border border-rose-500/50 shadow">
+                              ⚠ Incompatible
+                            </span>
+                          ) : isRecommended ? (
                             <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-500/25 text-emerald-300 border border-emerald-400/50 shadow">
                               ★ Best Fit
                             </span>
@@ -1844,22 +1919,28 @@ export default function Phase3DeployPage() {
                           <p className="text-[11px] text-slate-400 mt-0.5">{meta.subtitle}</p>
                         </div>
 
-                        {optionScore && (
+                        {targetIncomp.incompatible ? (
+                          <p className="text-[11px] text-rose-300/90 leading-snug pt-0.5">
+                            {targetIncomp.reason}
+                          </p>
+                        ) : optionScore ? (
                           <p className="text-[11px] text-slate-300 leading-snug pt-0.5">
                             {optionScore.reason}
                           </p>
-                        )}
+                        ) : null}
                       </div>
 
                       {/* Animated Fit Score Progress Bar */}
                       <div className="space-y-1.5 pt-2 border-t border-white/10">
                         <div className="flex items-center justify-between text-[10px] font-mono">
                           <span className="text-slate-400">Architecture Fit</span>
-                          <span className="font-bold text-white">{fitPercent}%</span>
+                          <span className={targetIncomp.incompatible ? 'font-bold text-rose-400' : 'font-bold text-white'}>
+                            {targetIncomp.incompatible ? 'Incompatible (0%)' : `${fitPercent}%`}
+                          </span>
                         </div>
                         <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
                           <div
-                            className={`h-full ${meta.barColor} transition-all duration-500`}
+                            className={`h-full ${targetIncomp.incompatible ? 'bg-rose-500' : meta.barColor} transition-all duration-500`}
                             style={{ width: `${fitPercent}%` }}
                           />
                         </div>
@@ -1868,6 +1949,44 @@ export default function Phase3DeployPage() {
                   );
                 })}
               </div>
+
+              {/* Dedicated Incompatible Override Alert Banner */}
+              {(() => {
+                const selectedIncomp = checkTargetCompatibility(selectedTarget, analysis?.applicationType);
+                if (!selectedIncomp.incompatible) return null;
+                return (
+                  <div className="rounded-2xl border border-rose-500/60 bg-gradient-to-r from-rose-950/70 via-slate-950/90 to-rose-950/70 p-4 shadow-xl text-rose-200 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">🚫</span>
+                        <span className="text-xs font-bold text-rose-300 uppercase tracking-wide">
+                          Incompatible Architecture Override Blocked
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                        HTTP 422 Guard Active
+                      </span>
+                    </div>
+                    <p className="text-xs text-rose-200/90 leading-relaxed">
+                      {selectedIncomp.reason}
+                    </p>
+                    <p className="text-[11px] text-rose-300/80">
+                      DeployMate guarantees zero broken deployments. Deploying an SSR/containerized repo to S3 static hosting produces 403 AccessDenied errors because S3 has no Node runtime.
+                    </p>
+                    {analysis?.recommendedTarget && (
+                      <div className="pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedTarget(analysis.recommendedTarget)}
+                          className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white font-bold text-xs shadow-lg transition"
+                        >
+                          ★ Switch to Recommended Target ({DEFAULT_TARGET_META.find((t) => t.target === analysis.recommendedTarget)?.title || analysis.recommendedTarget}) &rarr;
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Mini Live AWS Service Pill Bar for Selected Target */}
               <div className="rounded-xl bg-slate-950/90 border border-white/10 px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
@@ -2206,28 +2325,39 @@ export default function Phase3DeployPage() {
               </div>
             )}
 
-            <button
-              type="submit"
-              disabled={
-                isDeploying ||
-                Boolean(
-                  subdomain.trim() &&
-                    subdomainCheck &&
-                    (!subdomainCheck.valid || !subdomainCheck.available)
-                )
-              }
-              className={`w-full py-3.5 px-6 rounded-2xl font-bold text-sm text-white bg-gradient-to-r ${currentTheme.primaryBtn} animate-gradient-x shadow-xl shadow-indigo-500/20 hover:scale-[1.005] active:scale-[0.995] transition-all disabled:opacity-50`}
-            >
-              {isDeploying
-                ? `🚀 Provisioning Live ${cloudProvider} Infrastructure...`
-                : subdomain.trim()
-                ? `🚀 Deploy (${environment}) to ${cloudProvider} ${
-                    cloudProvider === 'AWS' ? selectedTarget : ''
-                  } → https://${subdomain.trim()}.${selectedDomain}`
-                : `🚀 Deploy (${environment}) to ${cloudProvider} (${
-                    cloudProvider === 'AWS' ? selectedTarget : 'Multi-Cloud Engine'
-                  })`}
-            </button>
+            {(() => {
+              const selectedIncomp = checkTargetCompatibility(selectedTarget, analysis?.applicationType);
+              const isSubdomainBlocked = Boolean(
+                subdomain.trim() &&
+                  subdomainCheck &&
+                  (!subdomainCheck.valid || !subdomainCheck.available)
+              );
+              const isDisabled = isDeploying || isSubdomainBlocked || selectedIncomp.incompatible;
+
+              return (
+                <button
+                  type="submit"
+                  disabled={isDisabled}
+                  className={`w-full py-3.5 px-6 rounded-2xl font-bold text-sm text-white ${
+                    selectedIncomp.incompatible
+                      ? 'bg-rose-900/60 border border-rose-500/50 cursor-not-allowed opacity-75'
+                      : `bg-gradient-to-r ${currentTheme.primaryBtn} animate-gradient-x shadow-xl shadow-indigo-500/20 hover:scale-[1.005] active:scale-[0.995]`
+                  } transition-all disabled:opacity-50`}
+                >
+                  {isDeploying
+                    ? `🚀 Provisioning Live ${cloudProvider} Infrastructure...`
+                    : selectedIncomp.incompatible
+                    ? `🚫 Cannot Deploy: ${selectedTarget} is Incompatible with ${analysis?.framework || 'Repository'}`
+                    : subdomain.trim()
+                    ? `🚀 Deploy (${environment}) to ${cloudProvider} ${
+                        cloudProvider === 'AWS' ? selectedTarget : ''
+                      } → https://${subdomain.trim()}.${selectedDomain}`
+                    : `🚀 Deploy (${environment}) to ${cloudProvider} (${
+                        cloudProvider === 'AWS' ? selectedTarget : 'Multi-Cloud Engine'
+                      })`}
+                </button>
+              );
+            })()}
           </form>
         )}
 

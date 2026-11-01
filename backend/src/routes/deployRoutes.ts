@@ -283,6 +283,7 @@ export function createDeployRouter(
         ...(result.code ? { code: result.code } : {}),
         ...(result.remediation ? { remediation: result.remediation } : {}),
         ...(result.plannedTarget ? { plannedTarget: result.plannedTarget } : {}),
+        ...(result.recommendedTarget ? { recommendedTarget: result.recommendedTarget } : {}),
       });
     }
 

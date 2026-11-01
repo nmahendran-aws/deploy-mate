@@ -11,6 +11,7 @@ import {
 import { CloudProviderNotAvailableError } from '../deployers/baseDeployer';
 import { DeploymentStore, deploymentStore } from '../store/deploymentStore';
 import {
+  AnalysisResult,
   CloudProvider,
   ConfiguredDomain,
   CreateDeploymentRequest,
@@ -46,6 +47,7 @@ export interface StartDeploymentResponse {
   code?: string;
   remediation?: string;
   plannedTarget?: DeploymentTarget;
+  recommendedTarget?: DeploymentTarget;
 }
 
 export class DeploymentManager {
@@ -73,6 +75,36 @@ export class DeploymentManager {
       return false;
     }
     return true;
+  }
+
+  /**
+   * Returns a 422 INCOMPATIBLE_TARGET response when the chosen deployer cannot host the analyzed
+   * repository, or undefined when the target is fine (or the analysis is only a name-based guess).
+   */
+  public checkTargetCompatibility(
+    analysis: AnalysisResult,
+    cloudProvider: CloudProvider,
+    target: DeploymentTarget
+  ): StartDeploymentResponse | undefined {
+    if (analysis.analysisSource === 'name-heuristic') {
+      return undefined;
+    }
+    const compatibility = resolveDeployer(cloudProvider, target).validateCompatibility(analysis);
+    if (compatibility.compatible) {
+      return undefined;
+    }
+    return {
+      ok: false,
+      statusCode: 422,
+      code: 'INCOMPATIBLE_TARGET',
+      error:
+        compatibility.reason ||
+        `Target ${target} is not compatible with ${analysis.framework}.`,
+      remediation:
+        compatibility.remediation ||
+        `Select the recommended target (${analysis.recommendedTarget}).`,
+      recommendedTarget: analysis.recommendedTarget,
+    };
   }
 
   /**
@@ -234,6 +266,33 @@ export class DeploymentManager {
         ephemeralGitHubToken = tokenData.token;
       } catch {
         // Proceed without installation token if exchange fails in offline mode
+      }
+    }
+
+    // Pre-flight: block a user-selected target that is incompatible with what the repository really is
+    // (e.g. Next.js SSR on S3 + CloudFront) BEFORE any record, hostname reservation or AWS resource exists.
+    // Only enforced when the analysis was read from the real repository; name-based guesses never block.
+    if (!this.isDryRunMode()) {
+      let preflightAnalysis: AnalysisResult | undefined;
+      try {
+        preflightAnalysis = await repositoryAnalyzer.analyzeRemoteGitHubRepo(
+          repoCheck.data.owner,
+          repoCheck.data.repo,
+          req.branch || repoCheck.data.branch || 'main',
+          ephemeralGitHubToken
+        );
+      } catch {
+        // Analysis unavailable: the in-pipeline check still guards the build.
+      }
+      if (preflightAnalysis) {
+        const incompatible = this.checkTargetCompatibility(
+          preflightAnalysis,
+          cloudProvider,
+          target
+        );
+        if (incompatible) {
+          return incompatible;
+        }
       }
     }
 

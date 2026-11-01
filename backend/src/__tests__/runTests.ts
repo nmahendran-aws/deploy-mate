@@ -1837,11 +1837,74 @@ async function runCodeBuildTests(): Promise<void> {
   console.log('ALL CODEBUILD SERVERLESS BUILD WORKER TESTS PASSED!\n');
 }
 
+async function runTargetCompatibilityTests(): Promise<void> {
+  console.log('=== Target Compatibility Pre-flight Guard Test Suite ===\n');
+  console.log('22. Testing incompatible target override is blocked (Next.js SSR on S3 + CloudFront)...');
+
+  const analyzer = new RepositoryAnalyzer();
+  const manager = new DeploymentManager();
+
+  const nextSsr = {
+    ...analyzer.evaluateSnapshot({
+      files: ['package.json', 'next.config.ts', 'app'],
+      packageJson: {
+        name: 'lifeguard',
+        scripts: { build: 'next build', start: 'next start' },
+        dependencies: { next: '16.2.4', react: '19.2.4', 'react-dom': '19.2.4' },
+      },
+      nextConfigContent: 'const nextConfig = {};\nexport default nextConfig;',
+    }),
+    analysisSource: 'repository' as const,
+  };
+  assert.strictEqual(nextSsr.applicationType, 'ssr-frontend');
+
+  // Overriding to S3 + CloudFront must be rejected with 422 and name the recommended target
+  const blocked = manager.checkTargetCompatibility(nextSsr, 'AWS', 'S3_CLOUDFRONT');
+  assert.ok(blocked, 'Expected S3_CLOUDFRONT to be blocked for Next.js SSR');
+  assert.strictEqual(blocked!.ok, false);
+  assert.strictEqual(blocked!.statusCode, 422);
+  assert.strictEqual(blocked!.code, 'INCOMPATIBLE_TARGET');
+  assert.strictEqual(blocked!.recommendedTarget, nextSsr.recommendedTarget);
+  assert.ok(blocked!.remediation?.includes(nextSsr.recommendedTarget));
+
+  // The recommended target itself is allowed
+  assert.strictEqual(
+    manager.checkTargetCompatibility(nextSsr, 'AWS', nextSsr.recommendedTarget),
+    undefined
+  );
+
+  // A genuinely static Vite app is allowed on S3 + CloudFront
+  const viteStatic = {
+    ...analyzer.evaluateSnapshot({
+      files: ['package.json', 'vite.config.ts', 'index.html'],
+      packageJson: {
+        name: 'vite-app',
+        scripts: { build: 'vite build' },
+        devDependencies: { vite: '^5.4.0' },
+      },
+    }),
+    analysisSource: 'repository' as const,
+  };
+  assert.strictEqual(manager.checkTargetCompatibility(viteStatic, 'AWS', 'S3_CLOUDFRONT'), undefined);
+
+  // A name-based guess must never block (it is not trustworthy evidence)
+  const guessed = { ...nextSsr, analysisSource: 'name-heuristic' as const };
+  assert.strictEqual(manager.checkTargetCompatibility(guessed, 'AWS', 'S3_CLOUDFRONT'), undefined);
+
+  // The analyzer flags name-based guesses so the UI can warn
+  const heuristic = analyzer.evaluateHeuristicFromRepoName('someone', 'lifeguard');
+  assert.ok(heuristic.framework.length > 0);
+
+  console.log('   ✓ Incompatible target override blocked with 422 INCOMPATIBLE_TARGET; compatible & guessed analyses pass.\n');
+  console.log('ALL TARGET COMPATIBILITY TESTS PASSED!\n');
+}
+
 async function runAllTests(): Promise<void> {
   await runPhase1To3Tests();
   await runPhase9Sprint1Tests();
   await runPhase9Sprint2Tests();
   await runCodeBuildTests();
+  await runTargetCompatibilityTests();
 }
 
 runAllTests().catch((err) => {

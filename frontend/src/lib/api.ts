@@ -167,6 +167,7 @@ export interface AnalysisResult {
   suggestedLambdaHandler?: string;
   targetOptions?: TargetOptionAssessment[];
   aiExplanation?: string;
+  analysisSource?: 'repository' | 'name-heuristic';
 }
 
 export interface AuditLogEntry {

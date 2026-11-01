@@ -30121,6 +30121,13 @@ var S3CloudFrontDeployer = class {
         remediation: "Submit a static React/Vite frontend repository for Phase 1."
       };
     }
+    if (analysis.applicationType === "ssr-frontend" || analysis.applicationType === "containerized-service") {
+      return {
+        compatible: false,
+        reason: `Repository was detected as "${analysis.framework}" (${analysis.applicationType}), which builds a server runtime instead of static HTML and cannot be served from S3 + CloudFront.`,
+        remediation: `Select the recommended target (${analysis.recommendedTarget}), or make the app a static export (for Next.js set output: 'export' in next.config) and redeploy to S3 + CloudFront.`
+      };
+    }
     return { compatible: true };
   }
   async deploy(ctx) {
@@ -30605,11 +30612,19 @@ var RepositoryAnalyzer = class {
         ephemeralGitHubToken
       );
       if (snapshot.files.length > 0 || snapshot.packageJson) {
-        return this.evaluateSnapshot(snapshot);
+        return { ...this.evaluateSnapshot(snapshot), analysisSource: "repository" };
       }
     } catch {
     }
-    return this.evaluateHeuristicFromRepoName(owner, repo);
+    const guessed = this.evaluateHeuristicFromRepoName(owner, repo);
+    return {
+      ...guessed,
+      analysisSource: "name-heuristic",
+      warnings: [
+        ...guessed.warnings,
+        "Could not read this repository from GitHub (rate limit, private repo, or offline), so this recommendation is only a guess from the repository name. Connect the GitHub App or retry before relying on it."
+      ]
+    };
   }
   /**
    * Deterministic rule engine that converts a repository snapshot into an AnalysisResult (Phase 3).
@@ -31035,62 +31050,111 @@ ${snapshot.pyprojectContent || ""}`.toLowerCase();
     const timeout = setTimeout(() => controller.abort(), 5e3);
     try {
       const res = await fetch(contentsUrl, { headers, signal: controller.signal });
-      if (!res.ok) {
-        throw new Error(`GitHub API responded with ${res.status}`);
-      }
-      const items = await res.json();
-      if (!Array.isArray(items)) {
-        throw new Error("Unexpected GitHub contents payload");
-      }
-      const files = items.map((item) => item.name);
-      const snapshot = { files };
-      const fetchFileText = async (fileName) => {
-        const found = items.find((i) => i.name.toLowerCase() === fileName.toLowerCase());
-        if (!found || !found.download_url) return void 0;
-        const fileRes = await fetch(found.download_url, {
-          headers: token ? { Authorization: `Bearer ${token}`, "User-Agent": "Repo2Cloud-Analyzer/1.0" } : void 0,
-          signal: controller.signal
-        });
-        if (!fileRes.ok) return void 0;
-        return await fileRes.text();
-      };
-      const pkgText = await fetchFileText("package.json");
-      if (pkgText) {
-        try {
-          snapshot.packageJson = JSON.parse(pkgText);
-        } catch {
-        }
-      }
-      const hasBackendDir = items.some(
-        (i) => i.name.toLowerCase() === "backend" && (i.type === "dir" || !i.download_url)
-      );
-      if (hasBackendDir) {
-        try {
-          const backendContentsUrl = `https://api.github.com/repos/${owner}/${repo}/contents/backend/package.json${refQuery}`;
-          const bRes = await fetch(backendContentsUrl, { headers, signal: controller.signal });
-          if (bRes.ok) {
-            const bItem = await bRes.json();
-            if (bItem?.download_url) {
-              const bFileRes = await fetch(bItem.download_url, {
-                headers: token ? { Authorization: `Bearer ${token}`, "User-Agent": "Repo2Cloud-Analyzer/1.0" } : void 0,
-                signal: controller.signal
-              });
-              if (bFileRes.ok) {
-                snapshot.backendPackageJson = JSON.parse(await bFileRes.text());
-              }
+      if (res.ok) {
+        const items = await res.json();
+        if (Array.isArray(items)) {
+          const files = items.map((item) => item.name);
+          const snapshot = { files };
+          const fetchFileText = async (fileName) => {
+            const found = items.find((i) => i.name.toLowerCase() === fileName.toLowerCase());
+            if (!found || !found.download_url) return void 0;
+            const fileRes = await fetch(found.download_url, {
+              headers: token ? { Authorization: `Bearer ${token}`, "User-Agent": "Repo2Cloud-Analyzer/1.0" } : void 0,
+              signal: controller.signal
+            });
+            if (!fileRes.ok) return void 0;
+            return await fileRes.text();
+          };
+          const pkgText = await fetchFileText("package.json");
+          if (pkgText) {
+            try {
+              snapshot.packageJson = JSON.parse(pkgText);
+            } catch {
             }
           }
-        } catch {
+          const hasBackendDir = items.some(
+            (i) => i.name.toLowerCase() === "backend" && (i.type === "dir" || !i.download_url)
+          );
+          if (hasBackendDir) {
+            try {
+              const backendContentsUrl = `https://api.github.com/repos/${owner}/${repo}/contents/backend/package.json${refQuery}`;
+              const bRes = await fetch(backendContentsUrl, { headers, signal: controller.signal });
+              if (bRes.ok) {
+                const bItem = await bRes.json();
+                if (bItem?.download_url) {
+                  const bFileRes = await fetch(bItem.download_url, {
+                    headers: token ? { Authorization: `Bearer ${token}`, "User-Agent": "Repo2Cloud-Analyzer/1.0" } : void 0,
+                    signal: controller.signal
+                  });
+                  if (bFileRes.ok) {
+                    snapshot.backendPackageJson = JSON.parse(await bFileRes.text());
+                  }
+                }
+              }
+            } catch {
+            }
+          }
+          snapshot.nextConfigContent = await fetchFileText("next.config.js") || await fetchFileText("next.config.mjs") || await fetchFileText("next.config.ts");
+          snapshot.dockerfileContent = await fetchFileText("Dockerfile");
+          snapshot.requirementsTxtContent = await fetchFileText("requirements.txt");
+          snapshot.pyprojectContent = await fetchFileText("pyproject.toml");
+          return snapshot;
         }
       }
-      snapshot.nextConfigContent = await fetchFileText("next.config.js") || await fetchFileText("next.config.mjs") || await fetchFileText("next.config.ts");
-      snapshot.dockerfileContent = await fetchFileText("Dockerfile");
-      snapshot.requirementsTxtContent = await fetchFileText("requirements.txt");
-      snapshot.pyprojectContent = await fetchFileText("pyproject.toml");
-      return snapshot;
+    } catch {
+    }
+    try {
+      const branchesToTry = [branch || "main", "master"];
+      for (const b of branchesToTry) {
+        const rawBase = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeURIComponent(b)}`;
+        const fetchRaw = async (filePath) => {
+          try {
+            const rawRes = await fetch(`${rawBase}/${filePath}`, {
+              headers: { "User-Agent": "Repo2Cloud-Analyzer/1.0" },
+              signal: controller.signal
+            });
+            if (!rawRes.ok) return void 0;
+            return await rawRes.text();
+          } catch {
+            return void 0;
+          }
+        };
+        const pkgText = await fetchRaw("package.json");
+        if (pkgText) {
+          const files = ["package.json"];
+          let parsedPkg;
+          try {
+            parsedPkg = JSON.parse(pkgText);
+          } catch {
+          }
+          const nextConfig = await fetchRaw("next.config.ts") || await fetchRaw("next.config.mjs") || await fetchRaw("next.config.js");
+          if (nextConfig) files.push("next.config.js");
+          const dockerfile = await fetchRaw("Dockerfile");
+          if (dockerfile) files.push("Dockerfile");
+          const requirementsTxt = await fetchRaw("requirements.txt");
+          if (requirementsTxt) files.push("requirements.txt");
+          const pyproject = await fetchRaw("pyproject.toml");
+          if (pyproject) files.push("pyproject.toml");
+          const serverless2 = await fetchRaw("serverless.yml") || await fetchRaw("serverless.yaml");
+          if (serverless2) files.push("serverless.yml");
+          const viteConfig = await fetchRaw("vite.config.ts") || await fetchRaw("vite.config.js") || await fetchRaw("vite.config.mjs");
+          if (viteConfig) files.push("vite.config.ts");
+          return {
+            files,
+            packageJson: parsedPkg,
+            nextConfigContent: nextConfig,
+            dockerfileContent: dockerfile,
+            requirementsTxtContent: requirementsTxt,
+            pyprojectContent: pyproject,
+            serverlessContent: serverless2
+          };
+        }
+      }
+    } catch {
     } finally {
       clearTimeout(timeout);
     }
+    throw new Error(`Unable to fetch snapshot for ${owner}/${repo}`);
   }
   /**
    * Deterministic fallback when offline or testing demo URLs (e.g., https://github.com/example/vite-app).
@@ -31433,6 +31497,27 @@ var DeploymentManager = class {
     return true;
   }
   /**
+   * Returns a 422 INCOMPATIBLE_TARGET response when the chosen deployer cannot host the analyzed
+   * repository, or undefined when the target is fine (or the analysis is only a name-based guess).
+   */
+  checkTargetCompatibility(analysis, cloudProvider, target) {
+    if (analysis.analysisSource === "name-heuristic") {
+      return void 0;
+    }
+    const compatibility = resolveDeployer(cloudProvider, target).validateCompatibility(analysis);
+    if (compatibility.compatible) {
+      return void 0;
+    }
+    return {
+      ok: false,
+      statusCode: 422,
+      code: "INCOMPATIBLE_TARGET",
+      error: compatibility.reason || `Target ${target} is not compatible with ${analysis.framework}.`,
+      remediation: compatibility.remediation || `Select the recommended target (${analysis.recommendedTarget}).`,
+      recommendedTarget: analysis.recommendedTarget
+    };
+  }
+  /**
    * Phases 1–9:
    * - Validates GitHub URL, command/path guardrails, subdomain & domain
    * - Resolves (CloudProvider, WorkloadArchetype, ExecutionTenancy) via multi-cloud registry (DM-901)
@@ -31554,6 +31639,28 @@ var DeploymentManager = class {
         );
         ephemeralGitHubToken = tokenData.token;
       } catch {
+      }
+    }
+    if (!this.isDryRunMode()) {
+      let preflightAnalysis;
+      try {
+        preflightAnalysis = await repositoryAnalyzer.analyzeRemoteGitHubRepo(
+          repoCheck.data.owner,
+          repoCheck.data.repo,
+          req.branch || repoCheck.data.branch || "main",
+          ephemeralGitHubToken
+        );
+      } catch {
+      }
+      if (preflightAnalysis) {
+        const incompatible = this.checkTargetCompatibility(
+          preflightAnalysis,
+          cloudProvider,
+          target
+        );
+        if (incompatible) {
+          return incompatible;
+        }
       }
     }
     const quotaCheck = securityGuardrails.checkDeploymentQuotas(this.store);
@@ -32461,7 +32568,8 @@ function createDeployRouter(store = deploymentStore, manager = deploymentManager
         error: result.error,
         ...result.code ? { code: result.code } : {},
         ...result.remediation ? { remediation: result.remediation } : {},
-        ...result.plannedTarget ? { plannedTarget: result.plannedTarget } : {}
+        ...result.plannedTarget ? { plannedTarget: result.plannedTarget } : {},
+        ...result.recommendedTarget ? { recommendedTarget: result.recommendedTarget } : {}
       });
     }
     const dep = result.deployment;

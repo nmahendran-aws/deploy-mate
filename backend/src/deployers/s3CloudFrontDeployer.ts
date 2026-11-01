@@ -65,6 +65,18 @@ export class S3CloudFrontDeployer implements IDeployer {
         remediation: 'Submit a static React/Vite frontend repository for Phase 1.',
       };
     }
+    // Server-rendered (e.g. Next.js SSR) and containerized apps emit server bundles, not an index.html,
+    // so S3 would serve AccessDenied for every request.
+    if (
+      analysis.applicationType === 'ssr-frontend' ||
+      analysis.applicationType === 'containerized-service'
+    ) {
+      return {
+        compatible: false,
+        reason: `Repository was detected as "${analysis.framework}" (${analysis.applicationType}), which builds a server runtime instead of static HTML and cannot be served from S3 + CloudFront.`,
+        remediation: `Select the recommended target (${analysis.recommendedTarget}), or make the app a static export (for Next.js set output: 'export' in next.config) and redeploy to S3 + CloudFront.`,
+      };
+    }
     return { compatible: true };
   }
 

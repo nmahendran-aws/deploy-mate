@@ -103,6 +103,11 @@ export interface AnalysisResult {
   suggestedLambdaHandler?: string;
   targetOptions?: TargetOptionAssessment[];
   aiExplanation?: string;
+  /**
+   * 'repository' = derived from the real repository contents.
+   * 'name-heuristic' = GitHub could not be read (rate limit, private repo, offline); result is a guess from the repo name.
+   */
+  analysisSource?: 'repository' | 'name-heuristic';
 }
 
 export interface ConfiguredDomain {
