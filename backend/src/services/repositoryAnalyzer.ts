@@ -831,7 +831,7 @@ export class RepositoryAnalyzer {
         const pkgText = await fetchRaw('package.json');
         if (pkgText) {
           const files: string[] = ['package.json'];
-          let parsedPkg: PackageJsonRecord | undefined;
+          let parsedPkg: RepoInspectionSnapshot['packageJson'];
           try {
             parsedPkg = JSON.parse(pkgText);
           } catch {}
