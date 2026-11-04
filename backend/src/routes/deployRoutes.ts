@@ -8,6 +8,7 @@ import { securityGuardrails } from '../services/securityGuardrails';
 import { selfHealingEngine } from '../services/selfHealingEngine';
 import { DeploymentStore, deploymentStore } from '../store/deploymentStore';
 import { EnvironmentType } from '../types/tenant';
+import { DeploymentAccessError, requireDeploymentAccess } from '../services/longplayAccess';
 import {
   getConfiguredDomains,
   resolveServerControlledDomain,
@@ -24,7 +25,8 @@ const VALID_ENVIRONMENTS = new Set<EnvironmentType>([
 export function createDeployRouter(
   store: DeploymentStore = deploymentStore,
   manager: DeploymentManager = deploymentManager,
-  queue: DeploymentJobQueue = deploymentJobQueue
+  queue: DeploymentJobQueue = deploymentJobQueue,
+  admitDeployment = requireDeploymentAccess
 ): Router {
   const router = Router();
 
@@ -266,6 +268,12 @@ export function createDeployRouter(
       }
     }
 
+    try {
+      await admitDeployment(req.auth?.activeOrgId);
+    } catch (error) {
+      const denial = error instanceof DeploymentAccessError ? error : new DeploymentAccessError(503, 'BILLING_UNAVAILABLE', 'Could not verify deployment access.');
+      return res.status(denial.status).json({ error: denial.message, code: denial.code });
+    }
     const result = await manager.startDeployment({
       ...body,
       environment: requestedEnv,
@@ -474,6 +482,12 @@ export function createDeployRouter(
       }
     }
 
+    try {
+      await admitDeployment(req.auth?.activeOrgId);
+    } catch (error) {
+      const denial = error instanceof DeploymentAccessError ? error : new DeploymentAccessError(503, 'BILLING_UNAVAILABLE', 'Could not verify deployment access.');
+      return res.status(denial.status).json({ error: denial.message, code: denial.code });
+    }
     const result = await manager.retryDeployment(req.params.id);
     if (!result.ok || !result.deployment) {
       return res.status(result.statusCode).json({ error: result.error });

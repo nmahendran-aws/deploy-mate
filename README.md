@@ -122,3 +122,13 @@ Returns current status (`QUEUED → ANALYZING → BUILDING → DEPLOYING → CON
 
 ### `POST /api/deploy/:id/retry` & `DELETE /api/deploy/:id`
 Retries failed deployments or tears down provisioned AWS resources and frees the reserved Route 53 subdomain.
+
+## Optional Longplay deployment admission
+
+Manual `POST /api/deploy` and `POST /api/deploy/:id/retry` can check an access Feature after existing organization/RBAC/project checks and before starting manager work. Unset `LONGPLAY_DEPLOY_FEATURE_ID` preserves current behavior. To opt in, configure its UUID plus `LONGPLAY_BASE_URL` (HTTPS origin), server-only `LONGPLAY_SECRET_KEY`, `LONGPLAY_APP_ID` and explicit `LONGPLAY_ENVIRONMENT` (`sandbox` or `live`). Enabled requests require the authenticated active organization; `body.orgId` is never a billing identity.
+
+The backend uses Longplay's 0.10 HTTP contract without changing its CommonJS compiler or adding an ESM-only SDK dependency. Customer binding is `deploymate:org:<verified-org-id>`. Only that opaque ID and Feature go to billing, never repositories, source, environment variables or AWS credentials. Requests have bounded timeouts, refuse redirects, verify response protocol/App/environment and accept access Features only. Denial is 402, missing identity 401, and billing failure a sanitized 503. No plan is persisted from a browser claim or read-only access check.
+
+This is a manual-deployment admission slice for #14, not the full tier/checkout/usage implementation. Automated GitHub-triggered deployment must receive equivalent verified admission before commercial launch; it is not covered by this route change. Existing status/read/export paths remain independent. No checkout, spending reservation, seat allocation, cloud provisioning or live billing is enabled by this integration.
+
+Offline regression command: `FORCE_DRY_RUN_TEST=true npx tsx --test backend/src/__tests__/longplayAccess.test.ts`.
